@@ -1,12 +1,12 @@
 # AI Chat CLI
 
-Простое консольное приложение на Kotlin для взаимодействия с AI через OpenAI API.
+Простое консольное приложение на Kotlin для взаимодействия с AI через Perplexity API.
 
 ## Требования
 
 - Java 17 или выше
 - Gradle (включен в проект через wrapper)
-- API ключ от OpenAI
+- API ключ от Perplexity
 
 ## Установка и настройка на macOS
 
@@ -24,33 +24,33 @@ brew install openjdk@17
 
 Или скачайте с [официального сайта Oracle](https://www.oracle.com/java/technologies/downloads/).
 
-### 2. Получите API ключ OpenAI
+### 2. Получите API ключ Perplexity
 
-1. Зарегистрируйтесь на [OpenAI](https://platform.openai.com/)
-2. Перейдите в раздел [API Keys](https://platform.openai.com/api-keys)
+1. Зарегистрируйтесь на [Perplexity](https://www.perplexity.ai/)
+2. Перейдите в раздел [API Settings](https://www.perplexity.ai/settings/api)
 3. Создайте новый API ключ
 
 ### 3. Установите переменную окружения
 
 Добавьте API ключ в переменные окружения. Для текущей сессии:
 ```bash
-export CURSOR_OPENAI_API_KEY=your_api_key_here
+export PERPLEXITY_API_KEY=your_api_key_here
 ```
 
 Для постоянной установки добавьте в `~/.zshrc` (или `~/.bash_profile` для bash):
 ```bash
-echo 'export CURSOR_OPENAI_API_KEY=your_api_key_here' >> ~/.zshrc
+echo 'export PERPLEXITY_API_KEY=your_api_key_here' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 ### 4. Опциональные переменные окружения
 
-- `OPENAI_API_URL` - URL API (по умолчанию: `https://api.openai.com/v1/chat/completions`)
-- `OPENAI_MODEL` - модель для использования (по умолчанию: `gpt-3.5-turbo`)
+- `PERPLEXITY_API_URL` - URL API (по умолчанию: `https://api.perplexity.ai/chat/completions`)
+- `PERPLEXITY_MODEL` - модель для использования (по умолчанию: `sonar`)
 
 Пример:
 ```bash
-export OPENAI_MODEL=gpt-4
+export PERPLEXITY_MODEL=sonar-pro
 ```
 
 ## Запуск
@@ -97,7 +97,7 @@ AI: Привет! У меня всё отлично, спасибо! Я гото
 ```
 src/main/kotlin/
 ├── Main.kt          # Точка входа, интерактивный цикл
-├── ApiClient.kt     # Класс для работы с OpenAI API
+├── ApiClient.kt     # Класс для работы с Perplexity API
 ├── InputHandler.kt  # Обработка пользовательского ввода
 └── Config.kt        # Конфигурация (переменные окружения)
 ```
@@ -113,17 +113,17 @@ src/main/kotlin/
 
 ## Устранение неполадок
 
-### Ошибка: "CURSOR_OPENAI_API_KEY не установлен"
+### Ошибка: "PERPLEXITY_API_KEY не установлен"
 Убедитесь, что переменная окружения установлена:
 ```bash
-echo $CURSOR_OPENAI_API_KEY
+echo $PERPLEXITY_API_KEY
 ```
 
 ### Ошибка: "неверный API ключ"
-Проверьте правильность API ключа на [OpenAI Platform](https://platform.openai.com/api-keys)
+Проверьте правильность API ключа на [Perplexity Settings](https://www.perplexity.ai/settings/api)
 
 ### Ошибка: "превышен лимит запросов"
-Подождите некоторое время или проверьте ваш тарифный план на OpenAI
+Подождите некоторое время или проверьте ваш тарифный план на Perplexity
 
 ## Лицензия
 
