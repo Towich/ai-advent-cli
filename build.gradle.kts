@@ -42,6 +42,27 @@ tasks.test {
     useJUnitPlatform()
 }
 
+// Задача для создания fat JAR со всеми зависимостями
+tasks.register<Jar>("fatJar") {
+    archiveClassifier.set("fat")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    
+    manifest {
+        attributes(
+            mapOf("Main-Class" to "org.example.MainKt")
+        )
+    }
+    
+    from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) }) {
+        exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+    }
+    
+    with(tasks.jar.get() as CopySpec)
+}
+
+tasks.build {
+    dependsOn("fatJar")
+}
 
 kotlin {
     jvmToolchain(17)
