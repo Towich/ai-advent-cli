@@ -18,6 +18,7 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.12")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.slf4j:slf4j-simple:2.0.9")
     testImplementation(kotlin("test"))
 }
 
@@ -28,6 +29,12 @@ application {
 tasks.test {
     useJUnitPlatform()
 }
+
+tasks.named<JavaExec>("run") {
+    standardInput = System.`in`
+    standardOutput = System.out
+}
+
 kotlin {
     jvmToolchain(17)
 }
