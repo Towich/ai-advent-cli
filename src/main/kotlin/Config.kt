@@ -3,6 +3,7 @@ package org.example
 object Config {
     private const val DEFAULT_API_URL = "https://api.perplexity.ai/chat/completions"
     private const val DEFAULT_MODEL = "sonar"
+    private const val DEFAULT_SERVER_PORT = 8080
     
     val apiKey: String
         get() = System.getenv("PERPLEXITY_API_KEY") 
@@ -16,5 +17,8 @@ object Config {
     
     val model: String
         get() = System.getenv("PERPLEXITY_MODEL") ?: DEFAULT_MODEL
+    
+    val serverPort: Int
+        get() = System.getenv("SERVER_PORT")?.toIntOrNull() ?: DEFAULT_SERVER_PORT
 }
 

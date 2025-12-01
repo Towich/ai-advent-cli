@@ -7,9 +7,9 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
-import kotlinx.coroutines.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.example.dto.ChatApiRequest
 
 @Serializable
 data class Message(
@@ -27,7 +27,8 @@ data class ChatRequest(
 
 @Serializable
 data class ChatResponse(
-    val choices: List<Choice>
+    val choices: List<Choice>,
+    val model: String? = null
 )
 
 @Serializable
@@ -35,18 +36,7 @@ data class Choice(
     val message: Message
 )
 
-@Serializable
-data class ErrorResponse(
-    val error: ErrorDetail
-)
-
-@Serializable
-data class ErrorDetail(
-    val message: String,
-    val type: String? = null
-)
-
-class ApiClient {
+class PerplexityService {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json {
@@ -56,35 +46,44 @@ class ApiClient {
         }
     }
     
-    suspend fun sendMessage(prompt: String): String {
+    suspend fun sendMessage(request: ChatApiRequest): Result<Pair<String, String>> {
         return try {
+            val model = request.model ?: Config.model
+            val maxTokens = request.maxTokens ?: 256
+            val disableSearch = request.disableSearch ?: true
+            
             val response: ChatResponse = client.post(Config.apiUrl) {
                 header(HttpHeaders.Authorization, "Bearer ${Config.apiKey}")
                 header(HttpHeaders.ContentType, ContentType.Application.Json)
                 setBody(
                     ChatRequest(
-                        model = Config.model,
-                        max_tokens = 256,
-                        disable_search = true,
+                        model = model,
+                        max_tokens = maxTokens,
+                        disable_search = disableSearch,
                         messages = listOf(
-                            Message(role = "user", content = prompt)
+                            Message(role = "user", content = request.message)
                         )
                     )
                 )
             }.body()
             
-            response.choices.firstOrNull()?.message?.content
-                ?: "Ошибка: пустой ответ от API"
-        } catch (e: Exception) {
-            when {
-                e.message?.contains("401") == true -> 
-                    "Ошибка: неверный API ключ. Проверьте переменную окружения PERPLEXITY_API_KEY"
-                e.message?.contains("429") == true -> 
-                    "Ошибка: превышен лимит запросов. Попробуйте позже"
-                e.message?.contains("500") == true -> 
-                    "Ошибка: проблема на стороне сервера API"
-                else -> "Ошибка при запросе к API: ${e.message}"
+            val content = response.choices.firstOrNull()?.message?.content
+            if (content != null) {
+                Result.success(Pair(content, response.model ?: model))
+            } else {
+                Result.failure(Exception("Пустой ответ от Perplexity API"))
             }
+        } catch (e: Exception) {
+            val errorMessage = when {
+                e.message?.contains("401") == true -> 
+                    "Неверный API ключ. Проверьте переменную окружения PERPLEXITY_API_KEY"
+                e.message?.contains("429") == true -> 
+                    "Превышен лимит запросов. Попробуйте позже"
+                e.message?.contains("500") == true -> 
+                    "Проблема на стороне сервера Perplexity API"
+                else -> "Ошибка при запросе к Perplexity API: ${e.message}"
+            }
+            Result.failure(Exception(errorMessage))
         }
     }
     
