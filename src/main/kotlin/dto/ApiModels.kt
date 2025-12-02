@@ -8,7 +8,10 @@ data class ChatApiRequest(
     val message: String,
     val model: String? = null,
     val maxTokens: Int? = null,
-    val disableSearch: Boolean? = null
+    val disableSearch: Boolean? = null,
+    val systemPrompt: String? = null,
+    val outputFormat: String? = null,
+    val outputSchema: String? = null
 )
 
 // Ответ сервера клиенту

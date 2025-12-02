@@ -9,6 +9,7 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import org.example.dto.ChatApiRequest
 
 @Serializable
@@ -46,11 +47,65 @@ class PerplexityService {
         }
     }
     
+    private fun buildSystemPrompt(request: ChatApiRequest): String? {
+        val parts = mutableListOf<String>()
+
+        // Добавляем пользовательский системный промпт, если есть
+        request.systemPrompt?.let { parts.add(it) }
+        
+        // Добавляем формат вывода, если указан
+        request.outputFormat?.let { format ->
+            parts.add(buildFormatSystemPrompt(format))
+            
+            // Если формат JSON и есть схема, добавляем схему
+            if (format.lowercase() == "json" && request.outputSchema != null) {
+                parts.add("Схема JSON: ${request.outputSchema}")
+            }
+        }
+        
+        return if (parts.isNotEmpty()) {
+            parts.joinToString("\n\n")
+        } else {
+            null
+        }
+    }
+
+    private fun buildFormatSystemPrompt(format: String): String {
+        return """
+            Ты — ассистент, который отвечает исключительно в формате $format без какой-либо дополнительной информации, пояснений или текста. 
+            Каждый ответ должен быть валидным $format-объектом, содержащим только необходимую структурированную информацию по запросу. 
+            Никакого свободного текста, описаний, комментариев или объяснений не добавляй.
+            Также не добавляй служебных символов, по типу "```json"
+            Не используй знаки переноса строк ('\n') и не переноси текст на д, пиши всё сплошным текстом
+        """.trimIndent()
+    }
+
+    private fun validateJsonResponse(content: String): Boolean {
+        return try {
+            val json = Json { ignoreUnknownKeys = true; isLenient = true }
+            json.decodeFromString<JsonObject>(content.trim())
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+    
     suspend fun sendMessage(request: ChatApiRequest): Result<Pair<String, String>> {
         return try {
             val model = request.model ?: Config.model
             val maxTokens = request.maxTokens ?: 256
             val disableSearch = request.disableSearch ?: true
+            
+            // Формируем список сообщений
+            val messages = mutableListOf<Message>()
+            
+            // Добавляем системное сообщение, если есть
+            buildSystemPrompt(request)?.let { systemPrompt ->
+                messages.add(Message(role = "system", content = systemPrompt))
+            }
+            
+            // Добавляем пользовательское сообщение
+            messages.add(Message(role = "user", content = request.message))
             
             val response: ChatResponse = client.post(Config.apiUrl) {
                 header(HttpHeaders.Authorization, "Bearer ${Config.apiKey}")
@@ -60,15 +115,18 @@ class PerplexityService {
                         model = model,
                         max_tokens = maxTokens,
                         disable_search = disableSearch,
-                        messages = listOf(
-                            Message(role = "user", content = request.message)
-                        )
+                        messages = messages
                     )
                 )
             }.body()
             
             val content = response.choices.firstOrNull()?.message?.content
+            println(content)
             if (content != null) {
+                // Валидируем JSON, если требуется
+                if (request.outputFormat?.lowercase() == "json" && !validateJsonResponse(content)) {
+                    return Result.failure(Exception("Ответ от Perplexity API не является валидным JSON"))
+                }
                 Result.success(Pair(content, response.model ?: model))
             } else {
                 Result.failure(Exception("Пустой ответ от Perplexity API"))

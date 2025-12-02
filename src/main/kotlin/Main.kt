@@ -59,15 +59,21 @@ fun Application.module() {
                     )
                 } else {
                     val error = result.exceptionOrNull() ?: Exception("Неизвестная ошибка")
-                    val errorCode = when {
-                        error.message?.contains("401") == true -> "UNAUTHORIZED"
-                        error.message?.contains("429") == true -> "RATE_LIMIT_EXCEEDED"
-                        error.message?.contains("500") == true -> "PERPLEXITY_SERVER_ERROR"
-                        else -> "PERPLEXITY_API_ERROR"
+                    val (errorCode, statusCode) = when {
+                        error.message?.contains("401") == true -> 
+                            Pair("UNAUTHORIZED", HttpStatusCode.Unauthorized)
+                        error.message?.contains("429") == true -> 
+                            Pair("RATE_LIMIT_EXCEEDED", HttpStatusCode.TooManyRequests)
+                        error.message?.contains("500") == true -> 
+                            Pair("PERPLEXITY_SERVER_ERROR", HttpStatusCode.BadGateway)
+                        error.message?.contains("не является валидным JSON") == true -> 
+                            Pair("INVALID_JSON_RESPONSE", HttpStatusCode.BadGateway)
+                        else -> 
+                            Pair("PERPLEXITY_API_ERROR", HttpStatusCode.BadGateway)
                     }
                     
                     call.respond(
-                        HttpStatusCode.BadGateway,
+                        statusCode,
                         ErrorResponse(
                             error = error.message ?: "Неизвестная ошибка",
                             code = errorCode
