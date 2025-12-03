@@ -32,12 +32,14 @@ fun Application.module() {
     install(CallLogging)
     
     val perplexityService = PerplexityService()
+    val sessionManager = SessionManager()
     
     routing {
         post("/api/perplexity/chat") {
             try {
                 val request = call.receive<ChatApiRequest>()
                 
+                // Валидация
                 if (request.message.isBlank()) {
                     call.respond(
                         HttpStatusCode.BadRequest,
@@ -46,17 +48,104 @@ fun Application.module() {
                     return@post
                 }
                 
-                val result = perplexityService.sendMessage(request)
+                if (request.maxRounds != null && request.maxRounds < 1) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        ErrorResponse("Поле 'maxRounds' должно быть >= 1", "INVALID_MAX_ROUNDS")
+                    )
+                    return@post
+                }
+                
+                // Получить или создать сессию
+                val session = if (request.sessionId != null) {
+                    sessionManager.getSession(request.sessionId)
+                        ?: run {
+                            call.respond(
+                                HttpStatusCode.NotFound,
+                                ErrorResponse("Сессия не найдена", "SESSION_NOT_FOUND")
+                            )
+                            return@post
+                        }
+                } else {
+                    // Создаем новую сессию, если указан maxRounds
+                    if (request.maxRounds != null && request.maxRounds > 1) {
+                        sessionManager.createSession(request)
+                    } else {
+                        // Режим одного раунда (обратная совместимость)
+                        null
+                    }
+                }
+                
+                // Если есть сессия, проверяем её состояние
+                if (session != null) {
+                    // Проверка, не завершен ли диалог
+                    if (session.isComplete) {
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            ErrorResponse("Диалог завершен", "DIALOG_COMPLETED")
+                        )
+                        return@post
+                    }
+                    
+                    // Проверка лимита раундов
+                    if (session.currentRound >= session.maxRounds) {
+                        session.isComplete = true
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            ErrorResponse("Превышен лимит раундов", "MAX_ROUNDS_EXCEEDED")
+                        )
+                        return@post
+                    }
+                }
+                
+                // Определить, является ли это последним раундом
+                // currentRound - это количество завершенных раундов, следующий будет currentRound + 1
+                val isLastRound = session?.let { (it.currentRound + 1) >= it.maxRounds } ?: false
+                
+                // Отправить сообщение
+                val result = perplexityService.sendMessage(request, session, isLastRound)
                 
                 if (result.isSuccess) {
-                    val (response, model) = result.getOrThrow()
-                    call.respond(
-                        HttpStatusCode.OK,
-                        ChatApiResponse(
-                            response = response,
-                            model = model
+                    val (content, model) = result.getOrThrow()
+                    
+                    if (session != null) {
+                        // Обновить сессию
+                        session.addUserMessage(request.message)
+                        session.addAssistantMessage(content)
+                        session.incrementRound() // Увеличиваем раунд после успешного ответа
+                        session.updateLastActivity()
+                        
+                        val isComplete = session.currentRound >= session.maxRounds
+                        if (isComplete) {
+                            session.isComplete = true
+                        }
+                        
+                        // Вернуть ответ с информацией о сессии
+                        call.respond(
+                            HttpStatusCode.OK,
+                            ChatApiResponse(
+                                content = content,
+                                model = model,
+                                isComplete = isComplete,
+                                round = session.currentRound, // Текущий раунд после инкремента
+                                maxRounds = session.maxRounds,
+                                sessionId = session.sessionId
+                            )
                         )
-                    )
+                    } else {
+                        // Режим одного раунда (обратная совместимость)
+                        call.respond(
+                            HttpStatusCode.OK,
+                            ChatApiResponse(
+                                content = content,
+                                model = model,
+                                isComplete = true,
+                                round = 1,
+                                maxRounds = 1,
+                                sessionId = ""
+                            )
+                        )
+                    }
                 } else {
                     val error = result.exceptionOrNull() ?: Exception("Неизвестная ошибка")
                     val (errorCode, statusCode) = when {
@@ -94,5 +183,6 @@ fun Application.module() {
     
     environment.monitor.subscribe(ApplicationStopped) {
         perplexityService.close()
+        sessionManager.shutdown()
     }
 }

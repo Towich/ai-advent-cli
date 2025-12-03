@@ -11,14 +11,20 @@ data class ChatApiRequest(
     val disableSearch: Boolean? = null,
     val systemPrompt: String? = null,
     val outputFormat: String? = null,
-    val outputSchema: String? = null
+    val outputSchema: String? = null,
+    val maxRounds: Int? = null,
+    val sessionId: String? = null
 )
 
 // Ответ сервера клиенту
 @Serializable
 data class ChatApiResponse(
-    val response: String,
-    val model: String? = null
+    val content: String,
+    val model: String? = null,
+    val isComplete: Boolean,
+    val round: Int,
+    val maxRounds: Int,
+    val sessionId: String
 )
 
 // Формат ошибки
