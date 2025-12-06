@@ -41,8 +41,7 @@ class ChatController(
                         systemPrompt = request.systemPrompt,
                         outputFormat = request.outputFormat,
                         outputSchema = request.outputSchema,
-                        maxRounds = request.maxRounds,
-                        sessionId = request.sessionId
+                        maxRounds = request.maxRounds
                     )
                     
                     // Выполняем use case
@@ -57,8 +56,7 @@ class ChatController(
                                     model = chatResult.model,
                                     isComplete = chatResult.isComplete,
                                     round = chatResult.round,
-                                    maxRounds = chatResult.maxRounds,
-                                    sessionId = chatResult.sessionId
+                                    maxRounds = chatResult.maxRounds
                                 )
                             )
                         },

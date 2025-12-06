@@ -9,12 +9,14 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.example.data.remote.dto.PerplexityMessage
 import org.example.data.remote.dto.PerplexityRequest
 import org.example.data.remote.dto.PerplexityResponse
 import org.example.domain.model.Message
 import org.example.domain.repository.PerplexityRepository
+import org.slf4j.LoggerFactory
 
 /**
  * Реализация репозитория для работы с Perplexity API
@@ -23,12 +25,16 @@ class PerplexityRepositoryImpl(
     private val apiUrl: String,
     private val apiKey: String
 ) : PerplexityRepository {
+    private val logger = LoggerFactory.getLogger(PerplexityRepositoryImpl::class.java)
+    private val jsonSerializer = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        prettyPrint = true
+    }
+    
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
-            json(Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-            })
+            json(jsonSerializer)
         }
         
         engine {
@@ -48,26 +54,32 @@ class PerplexityRepositoryImpl(
                 PerplexityMessage(role = message.role, content = message.content)
             }
             
-            // Логируем информацию о запросе
+            // Создаем объект запроса
+            val request = PerplexityRequest(
+                model = model,
+                max_tokens = maxTokens,
+                disable_search = disableSearch,
+                messages = perplexityMessages
+            )
+            
+            // Логируем эндпоинт и тело запроса
+            val requestBodyJson = jsonSerializer.encodeToString(request)
+            logger.info("Perplexity API Request:")
+            logger.info("  Endpoint: $apiUrl")
+            logger.info("  Request Body:\n$requestBodyJson")
+            
+            // Логируем дополнительную информацию о запросе
             val totalMessages = messages.size
             val totalChars = messages.sumOf { it.content.length }
-            println("Отправка запроса к Perplexity API:")
-            println("  - Количество сообщений: $totalMessages")
-            println("  - Общее количество символов: $totalChars")
-            println("  - Модель: $model")
-            println("  - Max tokens: $maxTokens")
+            logger.info("  - Количество сообщений: $totalMessages")
+            logger.info("  - Общее количество символов: $totalChars")
+            logger.info("  - Модель: $model")
+            logger.info("  - Max tokens: $maxTokens")
             
             val httpResponse = client.post(apiUrl) {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
                 header(HttpHeaders.ContentType, ContentType.Application.Json)
-                setBody(
-                    PerplexityRequest(
-                        model = model,
-                        max_tokens = maxTokens,
-                        disable_search = disableSearch,
-                        messages = perplexityMessages
-                    )
-                )
+                setBody(request)
             }
             
             val statusCode = httpResponse.status.value

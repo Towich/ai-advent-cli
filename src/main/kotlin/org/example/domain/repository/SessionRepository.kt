@@ -3,14 +3,13 @@ package org.example.domain.repository
 import org.example.domain.model.DialogSession
 
 /**
- * Интерфейс репозитория для управления сессиями диалогов
+ * Интерфейс репозитория для управления одной сессией диалога
  */
 interface SessionRepository {
     /**
-     * Создать новую сессию
+     * Создать или сбросить сессию
      */
-    fun createSession(
-        sessionId: String,
+    fun createOrResetSession(
         systemPrompt: String?,
         model: String,
         maxTokens: Int,
@@ -20,19 +19,14 @@ interface SessionRepository {
     ): DialogSession
     
     /**
-     * Получить сессию по ID
+     * Получить текущую сессию
      */
-    fun getSession(sessionId: String): DialogSession?
+    fun getSession(): DialogSession?
     
     /**
-     * Удалить сессию
+     * Очистить текущую сессию
      */
-    fun removeSession(sessionId: String)
-    
-    /**
-     * Очистить истекшие сессии
-     */
-    fun cleanupExpiredSessions(ttlMs: Long)
+    fun clearSession()
     
     /**
      * Завершить работу репозитория

@@ -1,35 +1,16 @@
 package org.example.data.repository
 
-import kotlinx.coroutines.*
 import org.example.domain.model.DialogSession
 import org.example.domain.repository.SessionRepository
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Реализация репозитория сессий с хранением в памяти
+ * Реализация репозитория для хранения одной сессии в памяти
  */
 class SessionRepositoryImpl : SessionRepository {
-    private val sessions = ConcurrentHashMap<String, DialogSession>()
-    private val cleanupJob: Job
+    @Volatile
+    private var currentSession: DialogSession? = null
     
-    companion object {
-        private const val SESSION_TTL_MS = 60 * 60 * 1000L // 1 час
-        private const val CLEANUP_INTERVAL_MS = 5 * 60 * 1000L // 5 минут
-    }
-    
-    init {
-        // Запускаем фоновую задачу для очистки неактивных сессий
-        cleanupJob = CoroutineScope(Dispatchers.Default).launch {
-            while (isActive) {
-                delay(CLEANUP_INTERVAL_MS)
-                cleanupExpiredSessions(SESSION_TTL_MS)
-            }
-        }
-    }
-    
-    override fun createSession(
-        sessionId: String,
+    override fun createOrResetSession(
         systemPrompt: String?,
         model: String,
         maxTokens: Int,
@@ -40,7 +21,6 @@ class SessionRepositoryImpl : SessionRepository {
         val now = System.currentTimeMillis()
         
         val session = DialogSession(
-            sessionId = sessionId,
             systemPrompt = systemPrompt,
             messages = mutableListOf(),
             currentRound = 0,
@@ -54,34 +34,20 @@ class SessionRepositoryImpl : SessionRepository {
             isComplete = false
         )
         
-        sessions[sessionId] = session
+        currentSession = session
         return session
     }
     
-    override fun getSession(sessionId: String): DialogSession? {
-        return sessions[sessionId]
+    override fun getSession(): DialogSession? {
+        return currentSession
     }
     
-    override fun removeSession(sessionId: String) {
-        sessions.remove(sessionId)
-    }
-    
-    override fun cleanupExpiredSessions(ttlMs: Long) {
-        val expiredSessions = sessions.values.filter { session ->
-            session.isExpired(ttlMs)
-        }
-        
-        expiredSessions.forEach { session ->
-            sessions.remove(session.sessionId)
-        }
-        
-        if (expiredSessions.isNotEmpty()) {
-            println("Очищено ${expiredSessions.size} неактивных сессий")
-        }
+    override fun clearSession() {
+        currentSession = null
     }
     
     override fun shutdown() {
-        cleanupJob.cancel()
+        currentSession = null
     }
 }
 

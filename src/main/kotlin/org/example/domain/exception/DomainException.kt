@@ -14,11 +14,6 @@ sealed class DomainException(message: String, val code: String) : Exception(mess
         "INVALID_MAX_ROUNDS"
     )
     
-    class SessionNotFoundException(sessionId: String) : DomainException(
-        "Сессия не найдена: $sessionId",
-        "SESSION_NOT_FOUND"
-    )
-    
     class DialogCompletedException : DomainException(
         "Диалог завершен",
         "DIALOG_COMPLETED"

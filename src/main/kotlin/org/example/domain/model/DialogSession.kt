@@ -4,7 +4,6 @@ package org.example.domain.model
  * Domain модель сессии диалога
  */
 data class DialogSession(
-    val sessionId: String,
     val systemPrompt: String?,
     val messages: MutableList<Message>,
     var currentRound: Int,

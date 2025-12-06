@@ -11,8 +11,7 @@ data class ChatApiResponse(
     val model: String? = null,
     val isComplete: Boolean,
     val round: Int,
-    val maxRounds: Int,
-    val sessionId: String
+    val maxRounds: Int
 )
 
 

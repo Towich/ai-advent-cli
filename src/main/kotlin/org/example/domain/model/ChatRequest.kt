@@ -11,8 +11,7 @@ data class ChatRequest(
     val systemPrompt: String?,
     val outputFormat: String?,
     val outputSchema: String?,
-    val maxRounds: Int?,
-    val sessionId: String?
+    val maxRounds: Int?
 )
 
 

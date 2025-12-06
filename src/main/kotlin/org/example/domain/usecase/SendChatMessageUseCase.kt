@@ -29,17 +29,16 @@ class SendChatMessageUseCase(
             return Result.failure(DomainException.InvalidMaxRoundsException())
         }
         
-        // Получить или создать сессию
-        val session = if (request.sessionId != null) {
-            sessionRepository.getSession(request.sessionId)
-                ?: return Result.failure(DomainException.SessionNotFoundException(request.sessionId))
-        } else {
-            // Создаем новую сессию, если указан maxRounds
-            if (request.maxRounds != null && request.maxRounds > 1) {
-                createNewSession(request)
+        // Получить текущую сессию или создать новую, если указан maxRounds > 1
+        val session = if (request.maxRounds != null && request.maxRounds > 1) {
+            val existingSession = sessionRepository.getSession()
+            if (existingSession != null && !existingSession.isComplete) {
+                existingSession
             } else {
-                null
+                createNewSession(request)
             }
+        } else {
+            null
         }
         
         // Проверка состояния сессии
@@ -90,8 +89,7 @@ class SendChatMessageUseCase(
                     model = responseModel,
                     isComplete = isComplete,
                     round = session.currentRound,
-                    maxRounds = session.maxRounds,
-                    sessionId = session.sessionId
+                    maxRounds = session.maxRounds
                 )
             } else {
                 // Режим одного раунда
@@ -100,8 +98,7 @@ class SendChatMessageUseCase(
                     model = responseModel,
                     isComplete = true,
                     round = 1,
-                    maxRounds = 1,
-                    sessionId = ""
+                    maxRounds = 1
                 )
             }
         }
@@ -113,8 +110,7 @@ class SendChatMessageUseCase(
         val disableSearch = request.disableSearch ?: true
         val maxRounds = request.maxRounds ?: 1
         
-        return sessionRepository.createSession(
-            sessionId = java.util.UUID.randomUUID().toString(),
+        return sessionRepository.createOrResetSession(
             systemPrompt = request.systemPrompt,
             model = model,
             maxTokens = maxTokens,
@@ -133,7 +129,7 @@ class SendChatMessageUseCase(
         
         if (session != null) {
             // Работаем с сессией
-            val baseSystemPrompt = session.systemPrompt
+            val baseSystemPrompt = request.systemPrompt ?: session.systemPrompt
             val nextRound = session.currentRound + 1
             
             val systemPrompt = buildSystemPromptWithRoundContext(

@@ -14,7 +14,6 @@ object ErrorHandler {
                 val statusCode = when (error) {
                     is DomainException.EmptyMessageException,
                     is DomainException.InvalidMaxRoundsException -> HttpStatusCode.BadRequest
-                    is DomainException.SessionNotFoundException -> HttpStatusCode.NotFound
                     is DomainException.DialogCompletedException,
                     is DomainException.MaxRoundsExceededException -> HttpStatusCode.BadRequest
                 }
