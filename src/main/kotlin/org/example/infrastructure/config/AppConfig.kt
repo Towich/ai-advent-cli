@@ -1,9 +1,13 @@
-package org.example
+package org.example.infrastructure.config
 
-object Config {
+/**
+ * Конфигурация приложения
+ */
+object AppConfig {
     private const val DEFAULT_API_URL = "https://api.perplexity.ai/chat/completions"
     private const val DEFAULT_MODEL = "sonar"
     private const val DEFAULT_SERVER_PORT = 8080
+    private const val DEFAULT_MAX_TOKENS = 256
     
     val apiKey: String
         get() = System.getenv("PERPLEXITY_API_KEY") 
@@ -20,5 +24,9 @@ object Config {
     
     val serverPort: Int
         get() = System.getenv("SERVER_PORT")?.toIntOrNull() ?: DEFAULT_SERVER_PORT
+    
+    val maxTokens: Int
+        get() = DEFAULT_MAX_TOKENS
 }
+
 
