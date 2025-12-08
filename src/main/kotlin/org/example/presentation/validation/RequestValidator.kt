@@ -16,6 +16,14 @@ object RequestValidator {
             return Result.failure(DomainException.InvalidMaxRoundsException())
         }
         
+        if (request.temperature != null) {
+            if (request.temperature < 0 || request.temperature >= 2) {
+                return Result.failure(
+                    IllegalArgumentException("Temperature должен быть в диапазоне: 0 <= temperature < 2")
+                )
+            }
+        }
+        
         return Result.success(Unit)
     }
 }

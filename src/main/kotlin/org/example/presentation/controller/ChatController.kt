@@ -41,7 +41,8 @@ class ChatController(
                         systemPrompt = request.systemPrompt,
                         outputFormat = request.outputFormat,
                         outputSchema = request.outputSchema,
-                        maxRounds = request.maxRounds
+                        maxRounds = request.maxRounds,
+                        temperature = request.temperature
                     )
                     
                     // Выполняем use case

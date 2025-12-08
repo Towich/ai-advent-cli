@@ -11,7 +11,8 @@ data class ChatRequest(
     val systemPrompt: String?,
     val outputFormat: String?,
     val outputSchema: String?,
-    val maxRounds: Int?
+    val maxRounds: Int?,
+    val temperature: Double?
 )
 
 

@@ -1,5 +1,7 @@
 package org.example.data.remote.dto
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /**
@@ -11,6 +13,9 @@ data class PerplexityRequest(
     val max_tokens: Int = 256,
     val disable_search: Boolean = true,
     val messages: List<PerplexityMessage>,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val temperature: Double? = null
 )
 
 @Serializable

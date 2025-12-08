@@ -14,13 +14,15 @@ interface PerplexityRepository {
      * @param model модель для использования
      * @param maxTokens максимальное количество токенов
      * @param disableSearch отключить поиск
+     * @param temperature температура для генерации (0 <= x < 2), null если не указана
      * @return результат с содержимым ответа и моделью
      */
     suspend fun sendMessage(
         messages: List<Message>,
         model: String,
         maxTokens: Int,
-        disableSearch: Boolean
+        disableSearch: Boolean,
+        temperature: Double? = null
     ): Result<Pair<String, String>>
     
     /**

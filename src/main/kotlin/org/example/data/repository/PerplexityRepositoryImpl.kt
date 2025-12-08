@@ -46,7 +46,8 @@ class PerplexityRepositoryImpl(
         messages: List<Message>,
         model: String,
         maxTokens: Int,
-        disableSearch: Boolean
+        disableSearch: Boolean,
+        temperature: Double?
     ): Result<Pair<String, String>> {
         return try {
             // Конвертируем domain модели в DTO
@@ -59,7 +60,8 @@ class PerplexityRepositoryImpl(
                 model = model,
                 max_tokens = maxTokens,
                 disable_search = disableSearch,
-                messages = perplexityMessages
+                messages = perplexityMessages,
+                temperature = temperature
             )
             
             // Логируем эндпоинт и тело запроса
@@ -75,6 +77,7 @@ class PerplexityRepositoryImpl(
             logger.info("  - Общее количество символов: $totalChars")
             logger.info("  - Модель: $model")
             logger.info("  - Max tokens: $maxTokens")
+            temperature?.let { logger.info("  - Temperature: $it") }
             
             val httpResponse = client.post(apiUrl) {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")

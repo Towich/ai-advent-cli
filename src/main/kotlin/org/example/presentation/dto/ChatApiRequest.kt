@@ -14,7 +14,8 @@ data class ChatApiRequest(
     val systemPrompt: String? = null,
     val outputFormat: String? = null,
     val outputSchema: String? = null,
-    val maxRounds: Int? = null
+    val maxRounds: Int? = null,
+    val temperature: Double? = null
 )
 
 

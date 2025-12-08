@@ -63,9 +63,10 @@ class SendChatMessageUseCase(
         val model = session?.model ?: (request.model ?: defaultModel)
         val maxTokens = session?.maxTokens ?: (request.maxTokens ?: defaultMaxTokens)
         val disableSearch = session?.disableSearch ?: (request.disableSearch ?: true)
+        val temperature = request.temperature
         
         // Отправить сообщение
-        val result = perplexityRepository.sendMessage(messages, model, maxTokens, disableSearch)
+        val result = perplexityRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
         
         return result.map { (content, responseModel) ->
             // Валидируем JSON, если требуется
