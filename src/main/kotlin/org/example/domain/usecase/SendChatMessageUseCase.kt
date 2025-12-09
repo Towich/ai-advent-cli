@@ -7,8 +7,11 @@ import org.example.domain.model.ChatRequest
 import org.example.domain.model.ChatResult
 import org.example.domain.model.DialogSession
 import org.example.domain.model.Message
+import org.example.domain.repository.GigaChatRepository
 import org.example.domain.repository.PerplexityRepository
 import org.example.domain.repository.SessionRepository
+import org.example.infrastructure.config.Vendor
+import org.example.infrastructure.config.VendorDetector
 
 /**
  * Use Case для отправки сообщения в чат
@@ -16,6 +19,7 @@ import org.example.domain.repository.SessionRepository
 class SendChatMessageUseCase(
     private val sessionRepository: SessionRepository,
     private val perplexityRepository: PerplexityRepository,
+    private val gigaChatRepository: GigaChatRepository,
     private val defaultModel: String,
     private val defaultMaxTokens: Int
 ) {
@@ -65,13 +69,23 @@ class SendChatMessageUseCase(
         val disableSearch = session?.disableSearch ?: (request.disableSearch ?: true)
         val temperature = request.temperature
         
-        // Отправить сообщение
-        val result = perplexityRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
+        // Определить вендора по модели
+        val vendor = VendorDetector.detectVendor(model)
+        
+        // Отправить сообщение в соответствующий репозиторий
+        val result = when (vendor) {
+            Vendor.PERPLEXITY -> perplexityRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
+            Vendor.GIGACHAT -> gigaChatRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
+        }
         
         return result.map { (content, responseModel) ->
             // Валидируем JSON, если требуется
             if (request.outputFormat?.lowercase() == "json" && !isValidJson(content)) {
-                throw Exception("Ответ от Perplexity API не является валидным JSON")
+                val vendorName = when (vendor) {
+                    Vendor.PERPLEXITY -> "Perplexity"
+                    Vendor.GIGACHAT -> "GigaChat"
+                }
+                throw Exception("Ответ от $vendorName API не является валидным JSON")
             }
             if (session != null) {
                 // Обновить сессию

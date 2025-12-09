@@ -21,61 +21,65 @@ class ChatController(
 ) {
     fun configureRoutes(routing: Routing) {
         routing {
-            post("/api/perplexity/chat") {
-                try {
-                    val request = call.receive<ChatApiRequest>()
-                    
-                    // Валидация
-                    RequestValidator.validate(request).getOrElse { error ->
-                        val (statusCode, errorResponse) = ErrorHandler.handleError(error)
-                        call.respond(statusCode, errorResponse)
-                        return@post
-                    }
-                    
-                    // Конвертируем DTO в domain модель
-                    val chatRequest = ChatRequest(
-                        message = request.message,
-                        model = request.model,
-                        maxTokens = request.maxTokens,
-                        disableSearch = request.disableSearch,
-                        systemPrompt = request.systemPrompt,
-                        outputFormat = request.outputFormat,
-                        outputSchema = request.outputSchema,
-                        maxRounds = request.maxRounds,
-                        temperature = request.temperature
-                    )
-                    
-                    // Выполняем use case
-                    val result = sendChatMessageUseCase.execute(chatRequest)
-                    
-                    result.fold(
-                        onSuccess = { chatResult ->
-                            call.respond(
-                                HttpStatusCode.OK,
-                                ChatApiResponse(
-                                    content = chatResult.content,
-                                    model = chatResult.model,
-                                    isComplete = chatResult.isComplete,
-                                    round = chatResult.round,
-                                    maxRounds = chatResult.maxRounds
-                                )
-                            )
-                        },
-                        onFailure = { error ->
-                            val (statusCode, errorResponse) = ErrorHandler.handleError(error)
-                            call.respond(statusCode, errorResponse)
-                        }
-                    )
-                } catch (e: Exception) {
+            post("/api/chat") {
+                handleChatRequest(call)
+            }
+        }
+    }
+    
+    private suspend fun handleChatRequest(call: ApplicationCall) {
+        try {
+            val request = call.receive<ChatApiRequest>()
+            
+            // Валидация
+            RequestValidator.validate(request).getOrElse { error ->
+                val (statusCode, errorResponse) = ErrorHandler.handleError(error)
+                call.respond(statusCode, errorResponse)
+                return
+            }
+            
+            // Конвертируем DTO в domain модель
+            val chatRequest = ChatRequest(
+                message = request.message,
+                model = request.model,
+                maxTokens = request.maxTokens,
+                disableSearch = request.disableSearch,
+                systemPrompt = request.systemPrompt,
+                outputFormat = request.outputFormat,
+                outputSchema = request.outputSchema,
+                maxRounds = request.maxRounds,
+                temperature = request.temperature
+            )
+            
+            // Выполняем use case
+            val result = sendChatMessageUseCase.execute(chatRequest)
+            
+            result.fold(
+                onSuccess = { chatResult ->
                     call.respond(
-                        HttpStatusCode.BadRequest,
-                        ErrorResponse(
-                            error = "Ошибка при обработке запроса: ${e.message}",
-                            code = "INVALID_REQUEST"
+                        HttpStatusCode.OK,
+                        ChatApiResponse(
+                            content = chatResult.content,
+                            model = chatResult.model,
+                            isComplete = chatResult.isComplete,
+                            round = chatResult.round,
+                            maxRounds = chatResult.maxRounds
                         )
                     )
+                },
+                onFailure = { error ->
+                    val (statusCode, errorResponse) = ErrorHandler.handleError(error)
+                    call.respond(statusCode, errorResponse)
                 }
-            }
+            )
+        } catch (e: Exception) {
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ErrorResponse(
+                    error = "Ошибка при обработке запроса: ${e.message}",
+                    code = "INVALID_REQUEST"
+                )
+            )
         }
     }
 }

@@ -8,6 +8,7 @@ import io.ktor.server.plugins.callloging.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.json.Json
+import org.example.data.repository.GigaChatRepositoryImpl
 import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
 import org.example.domain.usecase.SendChatMessageUseCase
@@ -33,13 +34,18 @@ fun Application.module() {
     // Инициализация зависимостей
     val sessionRepository = SessionRepositoryImpl()
     val perplexityRepository = PerplexityRepositoryImpl(
-        apiUrl = AppConfig.apiUrl,
-        apiKey = AppConfig.apiKey
+        apiUrl = AppConfig.perplexityApiUrl,
+        apiKey = AppConfig.perplexityApiKey
+    )
+    val gigaChatRepository = GigaChatRepositoryImpl(
+        apiUrl = AppConfig.gigachatApiUrl,
+        authorizationKey = AppConfig.gigachatApiKey
     )
     
     val sendChatMessageUseCase = SendChatMessageUseCase(
         sessionRepository = sessionRepository,
         perplexityRepository = perplexityRepository,
+        gigaChatRepository = gigaChatRepository,
         defaultModel = AppConfig.model,
         defaultMaxTokens = AppConfig.maxTokens
     )
@@ -54,6 +60,7 @@ fun Application.module() {
     // Очистка ресурсов при остановке
     environment.monitor.subscribe(ApplicationStopped) {
         perplexityRepository.close()
+        gigaChatRepository.close()
         sessionRepository.shutdown()
     }
 }
