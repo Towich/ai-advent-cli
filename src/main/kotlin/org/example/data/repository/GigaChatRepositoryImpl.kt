@@ -16,6 +16,7 @@ import org.example.data.remote.dto.GigaChatOAuthResponse
 import org.example.data.remote.dto.GigaChatRequest
 import org.example.data.remote.dto.GigaChatResponse
 import org.example.domain.model.Message
+import org.example.domain.model.TokenUsage
 import org.example.domain.repository.GigaChatRepository
 import org.slf4j.LoggerFactory
 import java.security.cert.X509Certificate
@@ -157,7 +158,7 @@ class GigaChatRepositoryImpl(
         maxTokens: Int,
         disableSearch: Boolean,
         temperature: Double?
-    ): Result<Pair<String, String>> {
+    ): Result<Triple<String, String, TokenUsage?>> {
         return try {
             // Получаем Access token
             val accessTokenResult = getAccessToken()
@@ -229,12 +230,19 @@ class GigaChatRepositoryImpl(
 
             val response: GigaChatResponse = httpResponse.body()
             val content = response.choices.firstOrNull()?.message?.content
+            val usage = response.usage?.let {
+                TokenUsage(
+                    promptTokens = it.prompt_tokens,
+                    completionTokens = it.completion_tokens,
+                    totalTokens = it.total_tokens
+                )
+            }
             println("Ответ получен, длина контента: ${content?.length ?: 0}")
-
+            
             if (content != null) {
                 // Нормализуем модель из ответа или используем исходную
                 val responseModel = response.model?.let { normalizeModel(it) } ?: model
-                Result.success(Pair(content, responseModel))
+                Result.success(Triple(content, responseModel, usage))
             } else {
                 Result.failure(Exception("Пустой ответ от GigaChat API"))
             }

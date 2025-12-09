@@ -15,6 +15,7 @@ import org.example.data.remote.dto.PerplexityMessage
 import org.example.data.remote.dto.PerplexityRequest
 import org.example.data.remote.dto.PerplexityResponse
 import org.example.domain.model.Message
+import org.example.domain.model.TokenUsage
 import org.example.domain.repository.PerplexityRepository
 import org.slf4j.LoggerFactory
 
@@ -42,13 +43,45 @@ class PerplexityRepositoryImpl(
         }
     }
     
+    /**
+     * Рассчитывает стоимость запроса на основе модели и количества токенов
+     * 
+     * @param model название модели Perplexity
+     * @param promptTokens количество токенов в промпте
+     * @param completionTokens количество токенов в ответе
+     * @return стоимость в долларах или null, если модель неизвестна или данные отсутствуют
+     */
+    private fun calculateCost(model: String, promptTokens: Int?, completionTokens: Int?): Double? {
+        if (promptTokens == null || completionTokens == null) {
+            return null
+        }
+        
+        // Цены за 1M токенов для каждой модели
+        val modelPricing = when (model.lowercase()) {
+            "sonar" -> Pair(1.0, 1.0) // $1/1M input, $1/1M output
+            "sonar-pro" -> Pair(3.0, 15.0) // $3/1M input, $15/1M output
+            "sonar-reasoning" -> Pair(1.0, 5.0) // $1/1M input, $5/1M output
+            "sonar-reasoning-pro" -> Pair(2.0, 8.0) // $2/1M input, $8/1M output
+            "sonar-deep-research" -> Pair(3.0, 15.0) // Предполагаем как sonar-pro
+            else -> return null // Неизвестная модель
+        }
+        
+        val (inputPrice, outputPrice) = modelPricing
+        
+        // Расчет: (токены / 1_000_000) * цена
+        val inputCost = (promptTokens / 1_000_000.0) * inputPrice
+        val outputCost = (completionTokens / 1_000_000.0) * outputPrice
+        
+        return inputCost + outputCost
+    }
+    
     override suspend fun sendMessage(
         messages: List<Message>,
         model: String,
         maxTokens: Int,
         disableSearch: Boolean,
         temperature: Double?
-    ): Result<Pair<String, String>> {
+    ): Result<Triple<String, String, TokenUsage?>> {
         return try {
             // Конвертируем domain модели в DTO
             val perplexityMessages = messages.map { message ->
@@ -104,10 +137,20 @@ class PerplexityRepositoryImpl(
             
             val response: PerplexityResponse = httpResponse.body()
             val content = response.choices.firstOrNull()?.message?.content
+            val responseModel = response.model ?: model
+            val usage = response.usage?.let {
+                val cost = calculateCost(responseModel, it.prompt_tokens, it.completion_tokens)
+                TokenUsage(
+                    promptTokens = it.prompt_tokens,
+                    completionTokens = it.completion_tokens,
+                    totalTokens = it.total_tokens,
+                    cost = cost
+                )
+            }
             println("Ответ получен, длина контента: ${content?.length ?: 0}")
             
             if (content != null) {
-                Result.success(Pair(content, response.model ?: model))
+                Result.success(Triple(content, responseModel, usage))
             } else {
                 Result.failure(Exception("Пустой ответ от Perplexity API"))
             }

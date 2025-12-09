@@ -9,7 +9,18 @@ data class ChatResult(
     val isComplete: Boolean,
     val round: Int,
     val maxRounds: Int,
-    val executionTimeMs: Long? = null
+    val executionTimeMs: Long? = null,
+    val usage: TokenUsage? = null
+)
+
+/**
+ * Информация об использовании токенов
+ */
+data class TokenUsage(
+    val promptTokens: Int? = null,
+    val completionTokens: Int? = null,
+    val totalTokens: Int? = null,
+    val cost: Double? = null
 )
 
 

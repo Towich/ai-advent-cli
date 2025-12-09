@@ -84,7 +84,7 @@ class SendChatMessageUseCase(
         
         val executionTimeMs = System.currentTimeMillis() - startTime
         
-        return result.map { (content, responseModel) ->
+        return result.map { (content, responseModel, usage) ->
             // Валидируем JSON, если требуется
             if (request.outputFormat?.lowercase() == "json" && !isValidJson(content)) {
                 val vendorName = when (vendor) {
@@ -111,7 +111,8 @@ class SendChatMessageUseCase(
                     isComplete = isComplete,
                     round = session.currentRound,
                     maxRounds = session.maxRounds,
-                    executionTimeMs = executionTimeMs
+                    executionTimeMs = executionTimeMs,
+                    usage = usage
                 )
             } else {
                 // Режим одного раунда
@@ -121,7 +122,8 @@ class SendChatMessageUseCase(
                     isComplete = true,
                     round = 1,
                     maxRounds = 1,
-                    executionTimeMs = executionTimeMs
+                    executionTimeMs = executionTimeMs,
+                    usage = usage
                 )
             }
         }

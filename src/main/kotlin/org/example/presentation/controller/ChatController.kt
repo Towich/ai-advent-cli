@@ -57,6 +57,14 @@ class ChatController(
             
             result.fold(
                 onSuccess = { chatResult ->
+                    val usage = chatResult.usage?.let {
+                        org.example.presentation.dto.Usage(
+                            prompt_tokens = it.promptTokens,
+                            completion_tokens = it.completionTokens,
+                            totalTokens = it.totalTokens,
+                            cost = it.cost
+                        )
+                    }
                     call.respond(
                         HttpStatusCode.OK,
                         ChatApiResponse(
@@ -65,7 +73,8 @@ class ChatController(
                             isComplete = chatResult.isComplete,
                             round = chatResult.round,
                             maxRounds = chatResult.maxRounds,
-                            executionTimeMs = chatResult.executionTimeMs
+                            executionTimeMs = chatResult.executionTimeMs,
+                            usage = usage
                         )
                     )
                 },

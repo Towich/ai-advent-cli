@@ -2,6 +2,7 @@ package org.example.domain.repository
 
 import org.example.domain.model.DialogSession
 import org.example.domain.model.Message
+import org.example.domain.model.TokenUsage
 
 /**
  * Интерфейс репозитория для работы с Perplexity API
@@ -15,7 +16,7 @@ interface PerplexityRepository {
      * @param maxTokens максимальное количество токенов
      * @param disableSearch отключить поиск
      * @param temperature температура для генерации (0 <= x < 2), null если не указана
-     * @return результат с содержимым ответа и моделью
+     * @return результат с содержимым ответа, моделью и информацией об использовании токенов
      */
     suspend fun sendMessage(
         messages: List<Message>,
@@ -23,7 +24,7 @@ interface PerplexityRepository {
         maxTokens: Int,
         disableSearch: Boolean,
         temperature: Double? = null
-    ): Result<Pair<String, String>>
+    ): Result<Triple<String, String, TokenUsage?>>
     
     /**
      * Закрыть соединения

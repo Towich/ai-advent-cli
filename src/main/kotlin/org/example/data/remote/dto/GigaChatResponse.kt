@@ -8,10 +8,18 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class GigaChatResponse(
     val choices: List<GigaChatChoice>,
-    val model: String? = null
+    val model: String? = null,
+    val usage: GigaChatUsage? = null
 )
 
 @Serializable
 data class GigaChatChoice(
     val message: GigaChatMessage
+)
+
+@Serializable
+data class GigaChatUsage(
+    val prompt_tokens: Int? = null,
+    val completion_tokens: Int? = null,
+    val total_tokens: Int? = null
 )
