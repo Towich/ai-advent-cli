@@ -64,7 +64,8 @@ class ChatController(
                             model = chatResult.model,
                             isComplete = chatResult.isComplete,
                             round = chatResult.round,
-                            maxRounds = chatResult.maxRounds
+                            maxRounds = chatResult.maxRounds,
+                            executionTimeMs = chatResult.executionTimeMs
                         )
                     )
                 },

@@ -73,11 +73,16 @@ class SendChatMessageUseCase(
         val vendor = VendorDetector.parseVendor(request.vendor)
             ?: throw IllegalArgumentException("Неизвестный vendor: ${request.vendor}")
         
+        // Измерить время выполнения запроса к нейросети
+        val startTime = System.currentTimeMillis()
+        
         // Отправить сообщение в соответствующий репозиторий
         val result = when (vendor) {
             Vendor.PERPLEXITY -> perplexityRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
             Vendor.GIGACHAT -> gigaChatRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
         }
+        
+        val executionTimeMs = System.currentTimeMillis() - startTime
         
         return result.map { (content, responseModel) ->
             // Валидируем JSON, если требуется
@@ -105,7 +110,8 @@ class SendChatMessageUseCase(
                     model = responseModel,
                     isComplete = isComplete,
                     round = session.currentRound,
-                    maxRounds = session.maxRounds
+                    maxRounds = session.maxRounds,
+                    executionTimeMs = executionTimeMs
                 )
             } else {
                 // Режим одного раунда
@@ -114,7 +120,8 @@ class SendChatMessageUseCase(
                     model = responseModel,
                     isComplete = true,
                     round = 1,
-                    maxRounds = 1
+                    maxRounds = 1,
+                    executionTimeMs = executionTimeMs
                 )
             }
         }

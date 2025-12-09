@@ -8,7 +8,8 @@ data class ChatResult(
     val model: String,
     val isComplete: Boolean,
     val round: Int,
-    val maxRounds: Int
+    val maxRounds: Int,
+    val executionTimeMs: Long? = null
 )
 
 
