@@ -69,8 +69,9 @@ class SendChatMessageUseCase(
         val disableSearch = session?.disableSearch ?: (request.disableSearch ?: true)
         val temperature = request.temperature
         
-        // Определить вендора по модели
-        val vendor = VendorDetector.detectVendor(model)
+        // Определить вендора из запроса
+        val vendor = VendorDetector.parseVendor(request.vendor)
+            ?: throw IllegalArgumentException("Неизвестный vendor: ${request.vendor}")
         
         // Отправить сообщение в соответствующий репозиторий
         val result = when (vendor) {

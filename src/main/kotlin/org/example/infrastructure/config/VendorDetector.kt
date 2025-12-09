@@ -1,8 +1,5 @@
 package org.example.infrastructure.config
 
-import org.example.infrastructure.config.AppConfig.GIGACHAT_MODELS
-import org.example.infrastructure.config.AppConfig.PERPLEXITY_MODELS
-
 /**
  * Утилита для определения вендора по модели
  */
@@ -12,19 +9,18 @@ enum class Vendor {
 }
 
 object VendorDetector {
-    
+
     /**
-     * Определяет вендора по имени модели
-     * 
-     * @param model имя модели
-     * @return вендор (PERPLEXITY или GIGACHAT)
+     * Парсит строку vendor в enum Vendor
+     *
+     * @param vendor строка vendor ("perplexity" или "gigachat")
+     * @return Vendor enum или null, если строка невалидна
      */
-    fun detectVendor(model: String): Vendor {
-        val modelLower = model.lowercase()
-        return when {
-            PERPLEXITY_MODELS.any { modelLower.contains(it) } -> Vendor.PERPLEXITY
-            GIGACHAT_MODELS.any { modelLower.contains(it.lowercase()) } -> Vendor.GIGACHAT
-            else -> Vendor.PERPLEXITY // По умолчанию для обратной совместимости
+    fun parseVendor(vendor: String): Vendor? {
+        return when (vendor.lowercase()) {
+            "perplexity" -> Vendor.PERPLEXITY
+            "gigachat" -> Vendor.GIGACHAT
+            else -> null
         }
     }
 }

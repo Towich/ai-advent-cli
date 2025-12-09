@@ -5,6 +5,7 @@ package org.example.domain.model
  */
 data class ChatRequest(
     val message: String,
+    val vendor: String,
     val model: String?,
     val maxTokens: Int?,
     val disableSearch: Boolean?,

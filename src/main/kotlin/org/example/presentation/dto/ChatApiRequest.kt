@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ChatApiRequest(
     val message: String,
+    val vendor: String,
     val model: String? = null,
     val maxTokens: Int? = null,
     val disableSearch: Boolean? = null,

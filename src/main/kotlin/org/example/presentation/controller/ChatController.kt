@@ -41,6 +41,7 @@ class ChatController(
             // Конвертируем DTO в domain модель
             val chatRequest = ChatRequest(
                 message = request.message,
+                vendor = request.vendor,
                 model = request.model,
                 maxTokens = request.maxTokens,
                 disableSearch = request.disableSearch,
