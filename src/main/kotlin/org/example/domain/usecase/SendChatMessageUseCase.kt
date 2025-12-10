@@ -8,6 +8,7 @@ import org.example.domain.model.ChatResult
 import org.example.domain.model.DialogSession
 import org.example.domain.model.Message
 import org.example.domain.repository.GigaChatRepository
+import org.example.domain.repository.HuggingFaceRepository
 import org.example.domain.repository.PerplexityRepository
 import org.example.domain.repository.SessionRepository
 import org.example.infrastructure.config.Vendor
@@ -20,6 +21,7 @@ class SendChatMessageUseCase(
     private val sessionRepository: SessionRepository,
     private val perplexityRepository: PerplexityRepository,
     private val gigaChatRepository: GigaChatRepository,
+    private val huggingFaceRepository: HuggingFaceRepository,
     private val defaultModel: String,
     private val defaultMaxTokens: Int
 ) {
@@ -80,6 +82,7 @@ class SendChatMessageUseCase(
         val result = when (vendor) {
             Vendor.PERPLEXITY -> perplexityRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
             Vendor.GIGACHAT -> gigaChatRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
+            Vendor.HUGGINGFACE -> huggingFaceRepository.sendMessage(messages, model, maxTokens, disableSearch, temperature)
         }
         
         val executionTimeMs = System.currentTimeMillis() - startTime
@@ -90,6 +93,7 @@ class SendChatMessageUseCase(
                 val vendorName = when (vendor) {
                     Vendor.PERPLEXITY -> "Perplexity"
                     Vendor.GIGACHAT -> "GigaChat"
+                    Vendor.HUGGINGFACE -> "Hugging Face"
                 }
                 throw Exception("Ответ от $vendorName API не является валидным JSON")
             }

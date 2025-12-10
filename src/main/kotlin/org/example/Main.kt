@@ -9,6 +9,7 @@ import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.json.Json
 import org.example.data.repository.GigaChatRepositoryImpl
+import org.example.data.repository.HuggingFaceRepositoryImpl
 import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
 import org.example.domain.usecase.SendChatMessageUseCase
@@ -42,11 +43,19 @@ fun Application.module() {
         apiUrl = AppConfig.gigachatApiUrl,
         authorizationKey = AppConfig.gigachatApiKey
     )
+    val huggingFaceRepository = HuggingFaceRepositoryImpl(
+        apiUrl = AppConfig.huggingFaceApiUrl,
+        apiKey = AppConfig.huggingFaceApiKey ?: throw IllegalStateException(
+            "HUGGINGFACE_API_KEY не установлен. " +
+            "Установите переменную окружения: export HUGGINGFACE_API_KEY=your_api_key"
+        )
+    )
     
     val sendChatMessageUseCase = SendChatMessageUseCase(
         sessionRepository = sessionRepository,
         perplexityRepository = perplexityRepository,
         gigaChatRepository = gigaChatRepository,
+        huggingFaceRepository = huggingFaceRepository,
         defaultModel = AppConfig.model,
         defaultMaxTokens = AppConfig.maxTokens
     )
@@ -54,6 +63,7 @@ fun Application.module() {
     val sendMultiChatMessageUseCase = SendMultiChatMessageUseCase(
         perplexityRepository = perplexityRepository,
         gigaChatRepository = gigaChatRepository,
+        huggingFaceRepository = huggingFaceRepository,
         defaultModel = AppConfig.model,
         defaultMaxTokens = AppConfig.maxTokens
     )
@@ -72,6 +82,7 @@ fun Application.module() {
     environment.monitor.subscribe(ApplicationStopped) {
         perplexityRepository.close()
         gigaChatRepository.close()
+        huggingFaceRepository.close()
         sessionRepository.shutdown()
     }
 }
