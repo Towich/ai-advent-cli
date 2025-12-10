@@ -12,6 +12,7 @@ import org.example.data.repository.GigaChatRepositoryImpl
 import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
 import org.example.domain.usecase.SendChatMessageUseCase
+import org.example.domain.usecase.SendMultiChatMessageUseCase
 import org.example.infrastructure.config.AppConfig
 import org.example.presentation.controller.ChatController
 
@@ -50,7 +51,17 @@ fun Application.module() {
         defaultMaxTokens = AppConfig.maxTokens
     )
     
-    val chatController = ChatController(sendChatMessageUseCase)
+    val sendMultiChatMessageUseCase = SendMultiChatMessageUseCase(
+        perplexityRepository = perplexityRepository,
+        gigaChatRepository = gigaChatRepository,
+        defaultModel = AppConfig.model,
+        defaultMaxTokens = AppConfig.maxTokens
+    )
+    
+    val chatController = ChatController(
+        sendChatMessageUseCase = sendChatMessageUseCase,
+        sendMultiChatMessageUseCase = sendMultiChatMessageUseCase
+    )
     
     // Настройка маршрутов
     routing {
