@@ -25,4 +25,24 @@ object VendorDetector {
             else -> null
         }
     }
+    
+    /**
+     * Определяет vendor по имени модели
+     * 
+     * @param model имя модели
+     * @return Vendor enum или null, если модель не распознана
+     */
+    fun detectVendorFromModel(model: String): Vendor? {
+        val modelLower = model.lowercase()
+        return when {
+            modelLower.startsWith("sonar") || 
+            modelLower.contains("perplexity") -> Vendor.PERPLEXITY
+            modelLower.contains("gigachat") || 
+            modelLower.startsWith("gpt") && modelLower.contains("giga") -> Vendor.GIGACHAT
+            modelLower.contains("huggingface") || 
+            modelLower.contains("meta-llama") ||
+            modelLower.contains("mistral") -> Vendor.HUGGINGFACE
+            else -> null
+        }
+    }
 }

@@ -11,6 +11,7 @@ import org.example.domain.repository.GigaChatRepository
 import org.example.domain.repository.HuggingFaceRepository
 import org.example.domain.repository.PerplexityRepository
 import org.example.domain.repository.SessionRepository
+import org.example.domain.service.MessageCharacterCounter
 import org.example.infrastructure.config.Vendor
 import org.example.infrastructure.config.VendorDetector
 
@@ -22,6 +23,7 @@ class SendChatMessageUseCase(
     private val perplexityRepository: PerplexityRepository,
     private val gigaChatRepository: GigaChatRepository,
     private val huggingFaceRepository: HuggingFaceRepository,
+    private val compressDialogHistoryUseCase: CompressDialogHistoryUseCase,
     private val defaultModel: String,
     private val defaultMaxTokens: Int
 ) {
@@ -47,6 +49,9 @@ class SendChatMessageUseCase(
             null
         }
         
+        // Переменная для отслеживания компрессии
+        var wasCompressed = false
+        
         // Проверка состояния сессии
         if (session != null) {
             if (session.isComplete) {
@@ -56,6 +61,20 @@ class SendChatMessageUseCase(
             if (session.currentRound >= session.maxRounds) {
                 session.isComplete = true
                 return Result.failure(DomainException.MaxRoundsExceededException())
+            }
+            
+            // Проверяем и сжимаем историю, если нужно
+            // Используем compressionThreshold из запроса или значение по умолчанию (10)
+            val compressionThreshold = request.compressionThreshold ?: 10
+            if (compressDialogHistoryUseCase.shouldCompress(session, compressionThreshold)) {
+                val compressResult = compressDialogHistoryUseCase.compress(session, compressionThreshold)
+                compressResult.fold(
+                    onSuccess = { wasCompressed = true },
+                    onFailure = { error ->
+                        // Логируем ошибку, но продолжаем выполнение
+                        println("Предупреждение: не удалось сжать историю диалога: ${error.message}")
+                    }
+                )
             }
         }
         
@@ -109,6 +128,9 @@ class SendChatMessageUseCase(
                     session.isComplete = true
                 }
                 
+                // Подсчитываем количество символов во всех сообщениях (включая системное, пользователя и ассистента)
+                val totalCharactersCount = MessageCharacterCounter.countTotalCharacters(session.messages)
+                
                 ChatResult(
                     content = content,
                     model = responseModel,
@@ -116,10 +138,14 @@ class SendChatMessageUseCase(
                     round = session.currentRound,
                     maxRounds = session.maxRounds,
                     executionTimeMs = executionTimeMs,
-                    usage = usage
+                    usage = usage,
+                    totalCharactersCount = totalCharactersCount,
+                    wasCompressed = wasCompressed.takeIf { it }
                 )
             } else {
-                // Режим одного раунда
+                // Режим одного раунда - подсчитываем символы из сообщений, которые были отправлены
+                val totalCharactersCount = MessageCharacterCounter.countTotalCharacters(messages)
+                
                 ChatResult(
                     content = content,
                     model = responseModel,
@@ -127,7 +153,9 @@ class SendChatMessageUseCase(
                     round = 1,
                     maxRounds = 1,
                     executionTimeMs = executionTimeMs,
-                    usage = usage
+                    usage = usage,
+                    totalCharactersCount = totalCharactersCount,
+                    wasCompressed = wasCompressed.takeIf { it }
                 )
             }
         }
@@ -196,12 +224,26 @@ class SendChatMessageUseCase(
                 messages.add(Message(role = Message.ROLE_SYSTEM, content = prompt))
             }
             
-            // Добавляем историю сообщений (кроме системных)
+            // Добавляем сжатые системные сообщения (с маркером [COMPRESSED_HISTORY])
             session.messages.forEach { message ->
-                if (message.role != Message.ROLE_SYSTEM) {
+                if (message.role == Message.ROLE_SYSTEM && message.content.startsWith("[COMPRESSED_HISTORY]")) {
                     messages.add(message)
                 }
             }
+            
+            // Добавляем историю сообщений (только user и assistant, исключая системные)
+            // Важно: после системных сообщений должно идти user, а не assistant
+            val historyMessages = session.messages.filter { it.role != Message.ROLE_SYSTEM }
+            
+            // Если первое сообщение в истории - assistant, пропускаем его
+            // (это может произойти, если последнее сообщение перед сжатием было от assistant)
+            val messagesToAdd = if (historyMessages.isNotEmpty() && historyMessages.first().role == Message.ROLE_ASSISTANT) {
+                historyMessages.drop(1) // Пропускаем первое assistant сообщение
+            } else {
+                historyMessages
+            }
+            
+            messages.addAll(messagesToAdd)
             
             // Добавляем новое пользовательское сообщение
             messages.add(Message(role = Message.ROLE_USER, content = request.message))

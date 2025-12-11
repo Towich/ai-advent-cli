@@ -12,6 +12,7 @@ import org.example.data.repository.GigaChatRepositoryImpl
 import org.example.data.repository.HuggingFaceRepositoryImpl
 import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
+import org.example.domain.usecase.CompressDialogHistoryUseCase
 import org.example.domain.usecase.SendChatMessageUseCase
 import org.example.domain.usecase.SendMultiChatMessageUseCase
 import org.example.infrastructure.config.AppConfig
@@ -51,11 +52,18 @@ fun Application.module() {
         )
     )
     
+    val compressDialogHistoryUseCase = CompressDialogHistoryUseCase(
+        perplexityRepository = perplexityRepository,
+        gigaChatRepository = gigaChatRepository,
+        huggingFaceRepository = huggingFaceRepository
+    )
+    
     val sendChatMessageUseCase = SendChatMessageUseCase(
         sessionRepository = sessionRepository,
         perplexityRepository = perplexityRepository,
         gigaChatRepository = gigaChatRepository,
         huggingFaceRepository = huggingFaceRepository,
+        compressDialogHistoryUseCase = compressDialogHistoryUseCase,
         defaultModel = AppConfig.model,
         defaultMaxTokens = AppConfig.maxTokens
     )

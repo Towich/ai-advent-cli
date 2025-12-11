@@ -13,7 +13,8 @@ data class ChatRequest(
     val outputFormat: String?,
     val outputSchema: String?,
     val maxRounds: Int?,
-    val temperature: Double?
+    val temperature: Double?,
+    val compressionThreshold: Int?
 )
 
 

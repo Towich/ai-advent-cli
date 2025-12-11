@@ -15,7 +15,9 @@ data class ChatApiResponse(
     val round: Int,
     val maxRounds: Int,
     val executionTimeMs: Long? = null,
-    val usage: Usage? = null
+    val usage: Usage? = null,
+    val totalCharactersCount: Int? = null,
+    val wasCompressed: Boolean? = null
 )
 
 @Serializable

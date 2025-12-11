@@ -10,7 +10,9 @@ data class ChatResult(
     val round: Int,
     val maxRounds: Int,
     val executionTimeMs: Long? = null,
-    val usage: TokenUsage? = null
+    val usage: TokenUsage? = null,
+    val totalCharactersCount: Int? = null,
+    val wasCompressed: Boolean? = null
 )
 
 /**
