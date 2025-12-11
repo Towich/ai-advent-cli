@@ -1,15 +1,15 @@
 Расход токенов по сложности запроса
 Анализ показывает чёткую корреляцию между сложностью запроса и расходом токенов:
 
-![diagram3.png](day8/diagram3.png)
+![diagram3.png](diagram3.png)
 
 Распределение по времени:
 
-![diagram2.png](day8/diagram2.png)
+![diagram2.png](diagram2.png)
 
 Распеделение стоимости моделей perplexity:
 
-![diagram4.png](day8/diagram4.png)
+![diagram4.png](diagram4.png)
 
 Короткий запрос ("Сколько будет 2+3?"): от 21 до 47 токенов в зависимости от модели. Perplexity sonar использует наименьшее количество токенов (21), а sonar-pro требует больше (47). GigaChat-2-Max находится посередине с 27 токенами.
 
