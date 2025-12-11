@@ -97,20 +97,12 @@ class PerplexityRepositoryImpl(
                 temperature = temperature
             )
             
-            // Логируем эндпоинт и тело запроса
-            val requestBodyJson = jsonSerializer.encodeToString(request)
-            logger.info("Perplexity API Request:")
-            logger.info("  Endpoint: $apiUrl")
-            logger.info("  Request Body:\n$requestBodyJson")
-            
-            // Логируем дополнительную информацию о запросе
+            // Логируем запрос в нейросеть
             val totalMessages = messages.size
             val totalChars = messages.sumOf { it.content.length }
-            logger.info("  - Количество сообщений: $totalMessages")
-            logger.info("  - Общее количество символов: $totalChars")
-            logger.info("  - Модель: $model")
-            logger.info("  - Max tokens: $maxTokens")
-            temperature?.let { logger.info("  - Temperature: $it") }
+            val requestBodyJson = jsonSerializer.encodeToString(request)
+            logger.info("Запрос в нейросеть [Perplexity]: модель=$model, сообщений=$totalMessages, символов=$totalChars, maxTokens=$maxTokens${temperature?.let { ", temperature=$it" } ?: ""}")
+            logger.debug("Body запроса [Perplexity]:\n$requestBodyJson")
             
             val httpResponse = client.post(apiUrl) {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
@@ -131,11 +123,12 @@ class PerplexityRepositoryImpl(
                     in 500..599 -> "Проблема на стороне сервера Perplexity API (HTTP $statusCode): $errorBody"
                     else -> "Ошибка при запросе к Perplexity API (HTTP $statusCode): $errorBody"
                 }
-                println("Ошибка Perplexity API: $errorMessage")
+                logger.error("Ошибка ответа от нейросети [Perplexity]: HTTP $statusCode - $errorMessage")
                 return Result.failure(Exception("HTTP $statusCode: $errorMessage"))
             }
             
             val response: PerplexityResponse = httpResponse.body()
+            val responseBodyJson = jsonSerializer.encodeToString(response)
             val content = response.choices.firstOrNull()?.message?.content
             val responseModel = response.model ?: model
             val usage = response.usage?.let {
@@ -147,18 +140,20 @@ class PerplexityRepositoryImpl(
                     cost = cost
                 )
             }
-            println("Ответ получен, длина контента: ${content?.length ?: 0}")
+            
+            // Логируем ответ от нейросети
+            val contentLength = content?.length ?: 0
+            val tokensInfo = usage?.let { "promptTokens=${it.promptTokens}, completionTokens=${it.completionTokens}, totalTokens=${it.totalTokens}, cost=$${it.cost?.let { String.format("%.6f", it) } ?: "N/A"}" } ?: "N/A"
+            logger.info("Ответ от нейросети [Perplexity]: модель=$responseModel, длина=$contentLength, $tokensInfo")
+            logger.debug("Body ответа [Perplexity]:\n$responseBodyJson")
             
             if (content != null) {
                 Result.success(Triple(content, responseModel, usage))
             } else {
+                logger.error("Пустой ответ от нейросети [Perplexity]")
                 Result.failure(Exception("Пустой ответ от Perplexity API"))
             }
         } catch (e: Exception) {
-            println("Исключение при запросе к Perplexity API: ${e.javaClass.simpleName}")
-            println("Сообщение: ${e.message}")
-            e.printStackTrace()
-            
             val errorMessage = when {
                 e.message?.contains("401") == true || e.message?.contains("HTTP 401") == true -> 
                     "Неверный API ключ. Проверьте переменную окружения PERPLEXITY_API_KEY"
@@ -170,6 +165,7 @@ class PerplexityRepositoryImpl(
                     "Таймаут при запросе к Perplexity API. Возможно, запрос слишком большой или сервер перегружен"
                 else -> "Ошибка при запросе к Perplexity API: ${e.message ?: e.javaClass.simpleName}"
             }
+            logger.error("Ошибка запроса в нейросеть [Perplexity]: ${e.javaClass.simpleName} - $errorMessage", e)
             Result.failure(Exception(errorMessage))
         }
     }

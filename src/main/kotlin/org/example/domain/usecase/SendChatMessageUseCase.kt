@@ -14,6 +14,7 @@ import org.example.domain.repository.SessionRepository
 import org.example.domain.service.MessageCharacterCounter
 import org.example.infrastructure.config.Vendor
 import org.example.infrastructure.config.VendorDetector
+import org.slf4j.LoggerFactory
 
 /**
  * Use Case для отправки сообщения в чат
@@ -27,6 +28,7 @@ class SendChatMessageUseCase(
     private val defaultModel: String,
     private val defaultMaxTokens: Int
 ) {
+    private val logger = LoggerFactory.getLogger(SendChatMessageUseCase::class.java)
     suspend fun execute(request: ChatRequest): Result<ChatResult> {
         // Валидация
         if (request.message.isBlank()) {
@@ -41,8 +43,10 @@ class SendChatMessageUseCase(
         val session = if (request.maxRounds != null && request.maxRounds > 1) {
             val existingSession = sessionRepository.getSession()
             if (existingSession != null && !existingSession.isComplete) {
+                logger.debug("Используется существующая сессия: round=${existingSession.currentRound}/${existingSession.maxRounds}")
                 existingSession
             } else {
+                logger.info("Создается новая сессия диалога: maxRounds=${request.maxRounds}")
                 createNewSession(request)
             }
         } else {
@@ -67,12 +71,22 @@ class SendChatMessageUseCase(
             // Используем compressionThreshold из запроса или значение по умолчанию (10)
             val compressionThreshold = request.compressionThreshold ?: 10
             if (compressDialogHistoryUseCase.shouldCompress(session, compressionThreshold)) {
-                val compressResult = compressDialogHistoryUseCase.compress(session, compressionThreshold)
+                // Определяем vendor и model из запроса для компрессии (используем ту же логику, что и для основного запроса)
+                val vendor = VendorDetector.parseVendor(request.vendor)
+                    ?: throw IllegalArgumentException("Неизвестный vendor: ${request.vendor}")
+                val modelForCompression = request.model ?: session.model
+                
+                val compressResult = compressDialogHistoryUseCase.compress(
+                    session = session,
+                    vendor = vendor,
+                    model = modelForCompression,
+                    compressionThreshold = compressionThreshold
+                )
                 compressResult.fold(
                     onSuccess = { wasCompressed = true },
                     onFailure = { error ->
                         // Логируем ошибку, но продолжаем выполнение
-                        println("Предупреждение: не удалось сжать историю диалога: ${error.message}")
+                        // Логирование будет добавлено в CompressDialogHistoryUseCase
                     }
                 )
             }
@@ -219,16 +233,23 @@ class SendChatMessageUseCase(
                 systemPrompt
             }
             
-            // Добавляем системное сообщение
-            finalSystemPrompt?.let { prompt ->
-                messages.add(Message(role = Message.ROLE_SYSTEM, content = prompt))
-            }
+            // Собираем все системные промпты в один
+            val allSystemPrompts = mutableListOf<String>()
+            
+            // Добавляем основной системный промпт (с информацией о раунде)
+            finalSystemPrompt?.let { allSystemPrompts.add(it) }
             
             // Добавляем сжатые системные сообщения (с маркером [COMPRESSED_HISTORY])
             session.messages.forEach { message ->
                 if (message.role == Message.ROLE_SYSTEM && message.content.startsWith("[COMPRESSED_HISTORY]")) {
-                    messages.add(message)
+                    allSystemPrompts.add(message.content)
                 }
+            }
+            
+            // Объединяем все системные промпты в один
+            if (allSystemPrompts.isNotEmpty()) {
+                val combinedSystemPrompt = allSystemPrompts.joinToString("\n\n")
+                messages.add(Message(role = Message.ROLE_SYSTEM, content = combinedSystemPrompt))
             }
             
             // Добавляем историю сообщений (только user и assistant, исключая системные)
@@ -309,7 +330,7 @@ class SendChatMessageUseCase(
             }
             parts.add(lastRoundInstruction)
         } else {
-            parts.add("\nТекущий раунд: $currentRound из $maxRounds. Отвечай только одним вопросом в этом раунде")
+            parts.add("\nТекущий раунд: $currentRound из $maxRounds.")
         }
         
         return if (parts.isNotEmpty()) {

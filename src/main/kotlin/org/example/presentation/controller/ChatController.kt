@@ -16,6 +16,7 @@ import org.example.presentation.dto.MultiChatApiResponse
 import org.example.presentation.dto.ModelResponse
 import org.example.presentation.middleware.ErrorHandler
 import org.example.presentation.validation.RequestValidator
+import org.slf4j.LoggerFactory
 
 /**
  * Контроллер для обработки запросов чата
@@ -24,6 +25,7 @@ class ChatController(
     private val sendChatMessageUseCase: SendChatMessageUseCase,
     private val sendMultiChatMessageUseCase: SendMultiChatMessageUseCase
 ) {
+    private val logger = LoggerFactory.getLogger(ChatController::class.java)
     fun configureRoutes(routing: Routing) {
         routing {
             post("/api/chat") {
@@ -39,8 +41,12 @@ class ChatController(
         try {
             val request = call.receive<ChatApiRequest>()
             
+            // Логируем запрос от юзера
+            logger.info("Запрос от юзера: vendor=${request.vendor}, model=${request.model ?: "default"}, messageLength=${request.message.length}, maxRounds=${request.maxRounds ?: 1}")
+            
             // Валидация
             RequestValidator.validate(request).getOrElse { error ->
+                logger.warn("Ошибка валидации запроса: ${error.message}")
                 val (statusCode, errorResponse) = ErrorHandler.handleError(error)
                 call.respond(statusCode, errorResponse)
                 return
@@ -66,6 +72,12 @@ class ChatController(
             
             result.fold(
                 onSuccess = { chatResult ->
+                    // Логируем ответ юзеру
+                    val usageInfo = chatResult.usage?.let { 
+                        "promptTokens=${it.promptTokens}, completionTokens=${it.completionTokens}, totalTokens=${it.totalTokens}, cost=$${it.cost?.let { String.format("%.6f", it) } ?: "N/A"}"
+                    } ?: "N/A"
+                    logger.info("Ответ юзеру: модель=${chatResult.model}, длина=${chatResult.content.length}, round=${chatResult.round}/${chatResult.maxRounds}, executionTime=${chatResult.executionTimeMs}ms, $usageInfo${chatResult.wasCompressed?.let { ", была компрессия истории" } ?: ""}")
+                    
                     val usage = chatResult.usage?.let {
                         org.example.presentation.dto.Usage(
                             prompt_tokens = it.promptTokens,
@@ -90,11 +102,13 @@ class ChatController(
                     )
                 },
                 onFailure = { error ->
+                    logger.error("Ошибка при обработке запроса: ${error.message}", error)
                     val (statusCode, errorResponse) = ErrorHandler.handleError(error)
                     call.respond(statusCode, errorResponse)
                 }
             )
         } catch (e: Exception) {
+            logger.error("Необработанное исключение при обработке запроса: ${e.message}", e)
             call.respond(
                 HttpStatusCode.BadRequest,
                 ErrorResponse(
@@ -109,8 +123,13 @@ class ChatController(
         try {
             val request = call.receive<MultiChatApiRequest>()
 
+            // Логируем запрос от юзера
+            val modelsInfo = request.models.joinToString(", ") { "${it.vendor}:${it.model}" }
+            logger.info("Запрос от юзера [multi]: models=[$modelsInfo], messageLength=${request.message.length}")
+
             // Валидация базовых полей
             if (request.message.isBlank()) {
+                logger.warn("Ошибка валидации: сообщение пустое")
                 call.respond(
                     HttpStatusCode.BadRequest,
                     ErrorResponse(
@@ -122,6 +141,7 @@ class ChatController(
             }
 
             if (request.models.isEmpty()) {
+                logger.warn("Ошибка валидации: не указаны модели")
                 call.respond(
                     HttpStatusCode.BadRequest,
                     ErrorResponse(
@@ -180,6 +200,13 @@ class ChatController(
             // Суммируем использование токенов
             val totalUsage = calculateTotalUsage(modelResponses)
 
+            // Логируем ответ юзеру
+            val successCount = modelResponses.count { it.success }
+            val totalUsageInfo = totalUsage?.let { 
+                "promptTokens=${it.prompt_tokens}, completionTokens=${it.completion_tokens}, totalTokens=${it.totalTokens}, cost=$${it.cost?.let { String.format("%.6f", it) } ?: "N/A"}"
+            } ?: "N/A"
+            logger.info("Ответ юзеру [multi]: успешно=$successCount/${modelResponses.size}, totalExecutionTime=${totalExecutionTimeMs}ms, $totalUsageInfo")
+
             call.respond(
                 HttpStatusCode.OK,
                 MultiChatApiResponse(
@@ -190,6 +217,7 @@ class ChatController(
                 )
             )
         } catch (e: IllegalArgumentException) {
+            logger.error("Ошибка валидации [multi]: ${e.message}", e)
             call.respond(
                 HttpStatusCode.BadRequest,
                 ErrorResponse(
@@ -198,6 +226,7 @@ class ChatController(
                 )
             )
         } catch (e: Exception) {
+            logger.error("Необработанное исключение при обработке запроса [multi]: ${e.message}", e)
             call.respond(
                 HttpStatusCode.InternalServerError,
                 ErrorResponse(

@@ -63,20 +63,12 @@ class HuggingFaceRepositoryImpl(
                 temperature = temperature
             )
             
-            // Логируем эндпоинт и тело запроса
-            val requestBodyJson = jsonSerializer.encodeToString(request)
-            logger.info("Hugging Face API Request:")
-            logger.info("  Endpoint: $apiUrl")
-            logger.info("  Request Body:\n$requestBodyJson")
-            
-            // Логируем дополнительную информацию о запросе
+            // Логируем запрос в нейросеть
             val totalMessages = messages.size
             val totalChars = messages.sumOf { it.content.length }
-            logger.info("  - Количество сообщений: $totalMessages")
-            logger.info("  - Общее количество символов: $totalChars")
-            logger.info("  - Модель: $model")
-            logger.info("  - Max tokens: $maxTokens")
-            temperature?.let { logger.info("  - Temperature: $it") }
+            val requestBodyJson = jsonSerializer.encodeToString(request)
+            logger.info("Запрос в нейросеть [HuggingFace]: модель=$model, сообщений=$totalMessages, символов=$totalChars, maxTokens=$maxTokens${temperature?.let { ", temperature=$it" } ?: ""}")
+            logger.debug("Body запроса [HuggingFace]:\n$requestBodyJson")
             
             val httpResponse = client.post(apiUrl) {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
@@ -97,11 +89,12 @@ class HuggingFaceRepositoryImpl(
                     in 500..599 -> "Проблема на стороне сервера Hugging Face API (HTTP $statusCode): $errorBody"
                     else -> "Ошибка при запросе к Hugging Face API (HTTP $statusCode): $errorBody"
                 }
-                println("Ошибка Hugging Face API: $errorMessage")
+                logger.error("Ошибка ответа от нейросети [HuggingFace]: HTTP $statusCode - $errorMessage")
                 return Result.failure(Exception("HTTP $statusCode: $errorMessage"))
             }
             
             val response: HuggingFaceResponse = httpResponse.body()
+            val responseBodyJson = jsonSerializer.encodeToString(response)
             val content = response.choices.firstOrNull()?.message?.content
             val responseModel = response.model ?: model
             val usage = response.usage?.let {
@@ -111,18 +104,20 @@ class HuggingFaceRepositoryImpl(
                     totalTokens = it.total_tokens
                 )
             }
-            println("Ответ получен, длина контента: ${content?.length ?: 0}")
+            
+            // Логируем ответ от нейросети
+            val contentLength = content?.length ?: 0
+            val tokensInfo = usage?.let { "promptTokens=${it.promptTokens}, completionTokens=${it.completionTokens}, totalTokens=${it.totalTokens}" } ?: "N/A"
+            logger.info("Ответ от нейросети [HuggingFace]: модель=$responseModel, длина=$contentLength, $tokensInfo")
+            logger.debug("Body ответа [HuggingFace]:\n$responseBodyJson")
             
             if (content != null) {
                 Result.success(Triple(content, responseModel, usage))
             } else {
+                logger.error("Пустой ответ от нейросети [HuggingFace]")
                 Result.failure(Exception("Пустой ответ от Hugging Face API"))
             }
         } catch (e: Exception) {
-            println("Исключение при запросе к Hugging Face API: ${e.javaClass.simpleName}")
-            println("Сообщение: ${e.message}")
-            e.printStackTrace()
-            
             val errorMessage = when {
                 e.message?.contains("401") == true || e.message?.contains("HTTP 401") == true -> 
                     "Неверный API ключ. Проверьте переменную окружения HUGGINGFACE_API_KEY"
@@ -134,6 +129,7 @@ class HuggingFaceRepositoryImpl(
                     "Таймаут при запросе к Hugging Face API. Возможно, запрос слишком большой или сервер перегружен"
                 else -> "Ошибка при запросе к Hugging Face API: ${e.message ?: e.javaClass.simpleName}"
             }
+            logger.error("Ошибка запроса в нейросеть [HuggingFace]: ${e.javaClass.simpleName} - $errorMessage", e)
             Result.failure(Exception(errorMessage))
         }
     }

@@ -2,11 +2,14 @@ package org.example.data.repository
 
 import org.example.domain.model.DialogSession
 import org.example.domain.repository.SessionRepository
+import org.slf4j.LoggerFactory
 
 /**
  * Реализация репозитория для хранения одной сессии в памяти
  */
 class SessionRepositoryImpl : SessionRepository {
+    private val logger = LoggerFactory.getLogger(SessionRepositoryImpl::class.java)
+    
     @Volatile
     private var currentSession: DialogSession? = null
     
@@ -35,6 +38,7 @@ class SessionRepositoryImpl : SessionRepository {
         )
         
         currentSession = session
+        logger.info("Создана новая сессия диалога: модель=$model, maxRounds=$maxRounds, maxTokens=$maxTokens, disableSearch=$disableSearch")
         return session
     }
     
@@ -43,10 +47,12 @@ class SessionRepositoryImpl : SessionRepository {
     }
     
     override fun clearSession() {
+        logger.debug("Сессия диалога очищена")
         currentSession = null
     }
     
     override fun shutdown() {
+        logger.debug("SessionRepository остановлен")
         currentSession = null
     }
 }

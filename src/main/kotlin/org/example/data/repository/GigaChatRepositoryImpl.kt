@@ -85,13 +85,12 @@ class GigaChatRepositoryImpl(
         val expiresAt = tokenExpiresAt
 
         if (cachedToken != null && now < expiresAt) {
-            logger.debug("Используется кэшированный Access token")
             return Result.success(cachedToken)
         }
 
         // Токен истек или отсутствует, получаем новый
         // Делаем это вне блокировки, чтобы не блокировать другие потоки
-        logger.info("Получение нового Access token через OAuth")
+        logger.debug("Получение нового Access token через OAuth [GigaChat]")
 
         val tokenResult = try {
             // Генерируем уникальный RqUID
@@ -112,8 +111,6 @@ class GigaChatRepositoryImpl(
             }
 
             val statusCode = httpResponse.status.value
-            logger.info("GigaChat OAuth Response:")
-            logger.info("  Status Code: $statusCode")
 
             if (statusCode !in 200..299) {
                 val errorBody = try {
@@ -121,15 +118,13 @@ class GigaChatRepositoryImpl(
                 } catch (e: Exception) {
                     "Не удалось прочитать тело ответа: ${e.message}"
                 }
-                logger.error("  Error Body: $errorBody")
-                logger.error("  Response Headers: ${httpResponse.headers}")
 
                 val errorMessage = when (statusCode) {
                     401 -> "Неверный Authorization key. Проверьте переменную окружения GIGACHAT_API_KEY"
                     400 -> "Неверный запрос к OAuth API (HTTP 400): $errorBody"
                     else -> "Ошибка при получении Access token (HTTP $statusCode): $errorBody"
                 }
-                logger.error("Ошибка получения Access token: $errorMessage")
+                logger.error("Ошибка получения Access token [GigaChat]: HTTP $statusCode - $errorMessage")
                 return Result.failure(Exception(errorMessage))
             }
 
@@ -142,10 +137,10 @@ class GigaChatRepositoryImpl(
                 tokenExpiresAt = now + tokenLifetimeMs
             }
 
-            logger.info("Access token успешно получен и кэширован")
+            logger.debug("Access token успешно получен и кэширован [GigaChat]")
             Result.success(accessToken)
         } catch (e: Exception) {
-            logger.error("Исключение при получении Access token: ${e.message}", e)
+            logger.error("Ошибка получения Access token [GigaChat]: ${e.message}", e)
             Result.failure(Exception("Ошибка при получении Access token: ${e.message}"))
         }
 
@@ -179,21 +174,13 @@ class GigaChatRepositoryImpl(
                 temperature = temperature
             )
 
-            // Логируем эндпоинт и тело запроса
-            val requestBodyJson = jsonSerializer.encodeToString(request)
-            logger.info("GigaChat API Request:")
-            logger.info("  Endpoint: $apiUrl")
-            logger.info("  Request Body:\n$requestBodyJson")
-
-            // Логируем дополнительную информацию о запросе
+            // Логируем запрос в нейросеть
             val totalMessages = messages.size
             val totalChars = messages.sumOf { it.content.length }
-            logger.info("  - Количество сообщений: $totalMessages")
-            logger.info("  - Общее количество символов: $totalChars")
-            logger.info("  - Модель: $model")
-            logger.info("  - Max tokens: $maxTokens")
-            temperature?.let { logger.info("  - Temperature: $it") }
-
+            val requestBodyJson = jsonSerializer.encodeToString(request)
+            logger.info("Запрос в нейросеть [GigaChat]: модель=$model, сообщений=$totalMessages, символов=$totalChars, maxTokens=$maxTokens${temperature?.let { ", temperature=$it" } ?: ""}")
+            logger.debug("Body запроса [GigaChat]:\n$requestBodyJson")
+            
             val httpResponse = client.post(apiUrl) {
                 header(HttpHeaders.Authorization, "Bearer $accessToken")
                 header(HttpHeaders.ContentType, ContentType.Application.Json)
@@ -224,11 +211,12 @@ class GigaChatRepositoryImpl(
                     in 500..599 -> "Проблема на стороне сервера GigaChat API (HTTP $statusCode): $errorBody"
                     else -> "Ошибка при запросе к GigaChat API (HTTP $statusCode): $errorBody"
                 }
-                println("Ошибка GigaChat API: $errorMessage")
+                logger.error("Ошибка ответа от нейросети [GigaChat]: HTTP $statusCode - $errorMessage")
                 return Result.failure(Exception("HTTP $statusCode: $errorMessage"))
             }
 
             val response: GigaChatResponse = httpResponse.body()
+            val responseBodyJson = jsonSerializer.encodeToString(response)
             val content = response.choices.firstOrNull()?.message?.content
             val usage = response.usage?.let {
                 TokenUsage(
@@ -237,20 +225,21 @@ class GigaChatRepositoryImpl(
                     totalTokens = it.total_tokens
                 )
             }
-            println("Ответ получен, длина контента: ${content?.length ?: 0}")
+            
+            // Логируем ответ от нейросети
+            val contentLength = content?.length ?: 0
+            val responseModel = response.model?.let { normalizeModel(it) } ?: model
+            val tokensInfo = usage?.let { "promptTokens=${it.promptTokens}, completionTokens=${it.completionTokens}, totalTokens=${it.totalTokens}" } ?: "N/A"
+            logger.info("Ответ от нейросети [GigaChat]: модель=$responseModel, длина=$contentLength, $tokensInfo")
+            logger.debug("Body ответа [GigaChat]:\n$responseBodyJson")
             
             if (content != null) {
-                // Нормализуем модель из ответа или используем исходную
-                val responseModel = response.model?.let { normalizeModel(it) } ?: model
                 Result.success(Triple(content, responseModel, usage))
             } else {
+                logger.error("Пустой ответ от нейросети [GigaChat]")
                 Result.failure(Exception("Пустой ответ от GigaChat API"))
             }
         } catch (e: Exception) {
-            println("Исключение при запросе к GigaChat API: ${e.javaClass.simpleName}")
-            println("Сообщение: ${e.message}")
-            e.printStackTrace()
-
             val errorMessage = when {
                 e.message?.contains("401") == true || e.message?.contains("HTTP 401") == true ->
                     "Неверный Authorization key или Access token. Проверьте переменную окружения GIGACHAT_API_KEY"
@@ -275,6 +264,7 @@ class GigaChatRepositoryImpl(
 
                 else -> "Ошибка при запросе к GigaChat API: ${e.message ?: e.javaClass.simpleName}"
             }
+            logger.error("Ошибка запроса в нейросеть [GigaChat]: ${e.javaClass.simpleName} - $errorMessage", e)
             Result.failure(Exception(errorMessage))
         }
     }

@@ -17,8 +17,12 @@ import org.example.domain.usecase.SendChatMessageUseCase
 import org.example.domain.usecase.SendMultiChatMessageUseCase
 import org.example.infrastructure.config.AppConfig
 import org.example.presentation.controller.ChatController
+import org.slf4j.LoggerFactory
+
+private val logger = LoggerFactory.getLogger("org.example.MainKt")
 
 fun main() {
+    logger.info("Запуск сервера на порту ${AppConfig.serverPort}")
     embeddedServer(Netty, port = AppConfig.serverPort, host = "0.0.0.0", module = Application::module)
         .start(wait = true)
 }
@@ -88,6 +92,7 @@ fun Application.module() {
     
     // Очистка ресурсов при остановке
     environment.monitor.subscribe(ApplicationStopped) {
+        logger.info("Остановка сервера, очистка ресурсов")
         perplexityRepository.close()
         gigaChatRepository.close()
         huggingFaceRepository.close()

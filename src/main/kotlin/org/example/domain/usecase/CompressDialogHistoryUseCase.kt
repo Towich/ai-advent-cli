@@ -6,7 +6,7 @@ import org.example.domain.repository.GigaChatRepository
 import org.example.domain.repository.HuggingFaceRepository
 import org.example.domain.repository.PerplexityRepository
 import org.example.infrastructure.config.Vendor
-import org.example.infrastructure.config.VendorDetector
+import org.slf4j.LoggerFactory
 
 /**
  * Use Case для сжатия истории диалога
@@ -17,6 +17,8 @@ class CompressDialogHistoryUseCase(
     private val gigaChatRepository: GigaChatRepository,
     private val huggingFaceRepository: HuggingFaceRepository
 ) {
+    private val logger = LoggerFactory.getLogger(CompressDialogHistoryUseCase::class.java)
+    
     companion object {
         private const val DEFAULT_COMPRESSION_THRESHOLD = 10 // Значение по умолчанию
     }
@@ -41,10 +43,17 @@ class CompressDialogHistoryUseCase(
      * Сжимает историю диалога, создавая summary из первых compressionThreshold сообщений
      * 
      * @param session сессия диалога
+     * @param vendor вендор для компрессии (из запроса)
+     * @param model модель для компрессии (из запроса)
      * @param compressionThreshold порог количества сообщений для сжатия (по умолчанию 10)
      * @return Result с успешным результатом или ошибкой
      */
-    suspend fun compress(session: DialogSession, compressionThreshold: Int = DEFAULT_COMPRESSION_THRESHOLD): Result<Unit> {
+    suspend fun compress(
+        session: DialogSession, 
+        vendor: Vendor,
+        model: String,
+        compressionThreshold: Int = DEFAULT_COMPRESSION_THRESHOLD
+    ): Result<Unit> {
         // Берем только user и assistant сообщения (не системные и не сжатые)
         val userAndAssistantMessages = session.messages.filter { 
             (it.role == Message.ROLE_USER || it.role == Message.ROLE_ASSISTANT) &&
@@ -72,35 +81,33 @@ class CompressDialogHistoryUseCase(
             messagesToCompress = userAndAssistantMessages.take(compressionThreshold + 1)
         }
         
+        logger.info("Компрессия истории диалога: сжимаем ${messagesToCompress.size} сообщений, vendor=$vendor, модель=$model")
+        
         // Создаем промпт для summary
         val summaryPrompt = buildSummaryPrompt(messagesToCompress)
-        
-        // Определяем vendor и модель из сессии
-        val vendor = VendorDetector.detectVendorFromModel(session.model)
-            ?: Vendor.PERPLEXITY // По умолчанию используем Perplexity
         
         // Строим сообщения для запроса summary
         val messagesForSummary = buildMessagesForSummary(session, summaryPrompt)
         
-        // Отправляем запрос на создание summary
+        // Отправляем запрос на создание summary используя vendor и model из запроса
         val result = when (vendor) {
             Vendor.PERPLEXITY -> perplexityRepository.sendMessage(
                 messages = messagesForSummary,
-                model = session.model,
+                model = model,
                 maxTokens = session.maxTokens,
                 disableSearch = true, // Для summary отключаем поиск
                 temperature = null
             )
             Vendor.GIGACHAT -> gigaChatRepository.sendMessage(
                 messages = messagesForSummary,
-                model = session.model,
+                model = model,
                 maxTokens = session.maxTokens,
                 disableSearch = true,
                 temperature = null
             )
             Vendor.HUGGINGFACE -> huggingFaceRepository.sendMessage(
                 messages = messagesForSummary,
-                model = session.model,
+                model = model,
                 maxTokens = session.maxTokens,
                 disableSearch = true,
                 temperature = null
@@ -123,25 +130,28 @@ class CompressDialogHistoryUseCase(
                 session.messages.removeAt(index)
             }
             
-            // Добавляем summary как системное сообщение с особым маркером
-            val summaryMessage = Message(
-                role = Message.ROLE_SYSTEM,
-                content = "[COMPRESSED_HISTORY] $summaryContent"
-            )
-            
-            // Вставляем summary после системного промпта, если он есть
-            // Ищем последний системный промпт (не сжатый)
-            val lastSystemPromptIndex = session.messages.indexOfLast { 
-                it.role == Message.ROLE_SYSTEM && !it.content.startsWith("[COMPRESSED_HISTORY]")
+            // Ищем системный промпт
+            val lastSystemPromptIndex = session.messages.indexOfFirst {
+                it.role == Message.ROLE_SYSTEM
             }
             
             if (lastSystemPromptIndex >= 0) {
-                // Вставляем после последнего системного промпта
-                session.messages.add(lastSystemPromptIndex + 1, summaryMessage)
+                // Объединяем summary с существующим системным промптом
+                val existingSystemPrompt = session.messages[lastSystemPromptIndex]
+                val updatedContent = "${existingSystemPrompt.content}\n\n[COMPRESSED_HISTORY] $summaryContent"
+                session.messages[lastSystemPromptIndex] = existingSystemPrompt.copy(content = updatedContent)
             } else {
-                // Если системного промпта нет, вставляем в начало
+                // Если системного промпта нет, добавляем summary как новое сообщение
+                val summaryMessage = Message(
+                    role = Message.ROLE_SYSTEM,
+                    content = "[COMPRESSED_HISTORY] $summaryContent"
+                )
                 session.messages.add(0, summaryMessage)
             }
+            
+            logger.info("Компрессия истории диалога завершена: удалено ${indicesToRemove.size} сообщений, создан summary длиной ${summaryContent.length}")
+        }.onFailure { error ->
+            logger.error("Ошибка компрессии истории диалога: ${error.message}", error)
         }
     }
     
