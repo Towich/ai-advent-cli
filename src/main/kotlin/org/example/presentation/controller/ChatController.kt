@@ -64,7 +64,8 @@ class ChatController(
                 outputSchema = request.outputSchema,
                 maxRounds = request.maxRounds,
                 temperature = request.temperature,
-                compressionThreshold = request.compressionThreshold
+                compressionMessagesThreshold = request.compressionMessagesThreshold,
+                compressionTokensThreshold = request.compressionTokensThreshold
             )
             
             // Выполняем use case

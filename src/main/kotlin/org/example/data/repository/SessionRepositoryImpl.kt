@@ -34,7 +34,8 @@ class SessionRepositoryImpl : SessionRepository {
             createdAt = now,
             lastActivityAt = now,
             initialUserMessage = initialUserMessage,
-            isComplete = false
+            isComplete = false,
+            accumulatedTotalTokens = 0
         )
         
         currentSession = session

@@ -24,35 +24,46 @@ class CompressDialogHistoryUseCase(
     }
     
     /**
-     * Проверяет, нужно ли сжимать историю диалога
+     * Проверяет, нужно ли сжимать историю диалога по количеству сообщений
      * 
      * @param session сессия диалога
-     * @param compressionThreshold порог количества сообщений для сжатия (по умолчанию 10)
-     * @return true, если количество сообщений user и assistant >= compressionThreshold
+     * @param compressionMessagesThreshold порог количества сообщений для сжатия
+     * @return true, если количество сообщений user и assistant >= compressionMessagesThreshold
      */
-    fun shouldCompress(session: DialogSession, compressionThreshold: Int = DEFAULT_COMPRESSION_THRESHOLD): Boolean {
+    fun shouldCompressByMessages(session: DialogSession, compressionMessagesThreshold: Int): Boolean {
         // Считаем только user и assistant сообщения (не системные и не сжатые)
         val userAndAssistantMessages = session.messages.filter { 
             it.role == Message.ROLE_USER || it.role == Message.ROLE_ASSISTANT
         }
         
-        return userAndAssistantMessages.size >= compressionThreshold
+        return userAndAssistantMessages.size >= compressionMessagesThreshold
     }
     
     /**
-     * Сжимает историю диалога, создавая summary из первых compressionThreshold сообщений
+     * Проверяет, нужно ли сжимать историю диалога по количеству токенов
+     * 
+     * @param session сессия диалога
+     * @param compressionTokensThreshold порог количества токенов для сжатия
+     * @return true, если накопленное количество токенов >= compressionTokensThreshold
+     */
+    fun shouldCompressByTokens(session: DialogSession, compressionTokensThreshold: Int): Boolean {
+        return session.accumulatedTotalTokens >= compressionTokensThreshold
+    }
+    
+    /**
+     * Сжимает историю диалога по количеству сообщений, создавая summary из первых compressionMessagesThreshold сообщений
      * 
      * @param session сессия диалога
      * @param vendor вендор для компрессии (из запроса)
      * @param model модель для компрессии (из запроса)
-     * @param compressionThreshold порог количества сообщений для сжатия (по умолчанию 10)
+     * @param compressionMessagesThreshold порог количества сообщений для сжатия
      * @return Result с успешным результатом или ошибкой
      */
-    suspend fun compress(
+    suspend fun compressByMessages(
         session: DialogSession, 
         vendor: Vendor,
         model: String,
-        compressionThreshold: Int = DEFAULT_COMPRESSION_THRESHOLD
+        compressionMessagesThreshold: Int
     ): Result<Unit> {
         // Берем только user и assistant сообщения (не системные и не сжатые)
         val userAndAssistantMessages = session.messages.filter { 
@@ -60,12 +71,12 @@ class CompressDialogHistoryUseCase(
             !it.content.startsWith("[COMPRESSED_HISTORY]")
         }
         
-        if (userAndAssistantMessages.size < compressionThreshold) {
+        if (userAndAssistantMessages.size < compressionMessagesThreshold) {
             return Result.success(Unit)
         }
         
-        // Берем первые compressionThreshold сообщений для сжатия
-        var messagesToCompress = userAndAssistantMessages.take(compressionThreshold)
+        // Берем первые compressionMessagesThreshold сообщений для сжатия
+        var messagesToCompress = userAndAssistantMessages.take(compressionMessagesThreshold)
         
         if (messagesToCompress.isEmpty()) {
             return Result.success(Unit)
@@ -76,9 +87,9 @@ class CompressDialogHistoryUseCase(
         // (чтобы не терять контекст последнего ответа ассистента)
         if (messagesToCompress.isNotEmpty() && 
             messagesToCompress.last().role == Message.ROLE_USER &&
-            userAndAssistantMessages.size > compressionThreshold &&
-            userAndAssistantMessages[compressionThreshold].role == Message.ROLE_ASSISTANT) {
-            messagesToCompress = userAndAssistantMessages.take(compressionThreshold + 1)
+            userAndAssistantMessages.size > compressionMessagesThreshold &&
+            userAndAssistantMessages[compressionMessagesThreshold].role == Message.ROLE_ASSISTANT) {
+            messagesToCompress = userAndAssistantMessages.take(compressionMessagesThreshold + 1)
         }
         
         logger.info("Компрессия истории диалога: сжимаем ${messagesToCompress.size} сообщений, vendor=$vendor, модель=$model")
@@ -152,6 +163,129 @@ class CompressDialogHistoryUseCase(
             logger.info("Компрессия истории диалога завершена: удалено ${indicesToRemove.size} сообщений, создан summary длиной ${summaryContent.length}")
         }.onFailure { error ->
             logger.error("Ошибка компрессии истории диалога: ${error.message}", error)
+        }
+    }
+    
+    /**
+     * Сжимает историю диалога по количеству токенов, создавая summary из сообщений до достижения порога
+     * 
+     * @param session сессия диалога
+     * @param vendor вендор для компрессии (из запроса)
+     * @param model модель для компрессии (из запроса)
+     * @param compressionTokensThreshold порог количества токенов для сжатия
+     * @return Result с успешным результатом или ошибкой
+     */
+    suspend fun compressByTokens(
+        session: DialogSession, 
+        vendor: Vendor,
+        model: String,
+        compressionTokensThreshold: Int
+    ): Result<Unit> {
+        // Для компрессии по токенам используем ту же логику, что и по сообщениям
+        // Берем только user и assistant сообщения (не системные и не сжатые)
+        val userAndAssistantMessages = session.messages.filter { 
+            (it.role == Message.ROLE_USER || it.role == Message.ROLE_ASSISTANT) &&
+            !it.content.startsWith("[COMPRESSED_HISTORY]")
+        }
+        
+        if (userAndAssistantMessages.isEmpty()) {
+            return Result.success(Unit)
+        }
+        
+        // Берем сообщения для сжатия (примерно половину, чтобы не сжимать все сразу)
+        // Можно взять все сообщения кроме последних двух (user + assistant)
+        val messagesToCompress = if (userAndAssistantMessages.size > 2) {
+            userAndAssistantMessages.dropLast(2)
+        } else {
+            return Result.success(Unit) // Не сжимаем, если слишком мало сообщений
+        }
+        
+        if (messagesToCompress.isEmpty()) {
+            return Result.success(Unit)
+        }
+        
+        logger.info("Компрессия истории диалога по токенам: сжимаем ${messagesToCompress.size} сообщений, vendor=$vendor, модель=$model, accumulatedTokens=${session.accumulatedTotalTokens}")
+        
+        // Создаем промпт для summary
+        val summaryPrompt = buildSummaryPrompt(messagesToCompress)
+        
+        // Строим сообщения для запроса summary
+        val messagesForSummary = buildMessagesForSummary(session, summaryPrompt)
+        
+        // Отправляем запрос на создание summary используя vendor и model из запроса
+        val result = when (vendor) {
+            Vendor.PERPLEXITY -> perplexityRepository.sendMessage(
+                messages = messagesForSummary,
+                model = model,
+                maxTokens = session.maxTokens,
+                disableSearch = true, // Для summary отключаем поиск
+                temperature = null
+            )
+            Vendor.GIGACHAT -> gigaChatRepository.sendMessage(
+                messages = messagesForSummary,
+                model = model,
+                maxTokens = session.maxTokens,
+                disableSearch = true,
+                temperature = null
+            )
+            Vendor.HUGGINGFACE -> huggingFaceRepository.sendMessage(
+                messages = messagesForSummary,
+                model = model,
+                maxTokens = session.maxTokens,
+                disableSearch = true,
+                temperature = null
+            )
+        }
+        
+        return result.map { (summaryContent, _, usage) ->
+            // Вычитаем токены, потраченные на компрессию, из накопленных токенов
+            // Также вычитаем приблизительное количество токенов, которое было в сжатых сообщениях
+            // Для простоты вычитаем порог компрессии, так как мы сжали сообщения, которые привели к превышению порога
+            usage?.totalTokens?.let { compressionTokens ->
+                // Вычитаем токены, потраченные на компрессию
+                session.accumulatedTotalTokens = (session.accumulatedTotalTokens - compressionTokens).coerceAtLeast(0)
+                // Также вычитаем приблизительное количество токенов сжатых сообщений (примерно порог)
+                // Это не идеально точно, но позволяет избежать бесконечной компрессии
+                session.accumulatedTotalTokens = (session.accumulatedTotalTokens - compressionTokensThreshold / 2).coerceAtLeast(0)
+            }
+            
+            // Находим индексы сообщений для удаления
+            val indicesToRemove = mutableListOf<Int>()
+            val messagesToRemoveSet = messagesToCompress.toSet()
+            
+            session.messages.forEachIndexed { index, message ->
+                if (message in messagesToRemoveSet) {
+                    indicesToRemove.add(index)
+                }
+            }
+            
+            // Удаляем сообщения в обратном порядке, чтобы индексы не сдвигались
+            indicesToRemove.reversed().forEach { index ->
+                session.messages.removeAt(index)
+            }
+            
+            // Ищем системный промпт
+            val lastSystemPromptIndex = session.messages.indexOfFirst {
+                it.role == Message.ROLE_SYSTEM
+            }
+            
+            if (lastSystemPromptIndex >= 0) {
+                // Объединяем summary с существующим системным промптом
+                val existingSystemPrompt = session.messages[lastSystemPromptIndex]
+                val updatedContent = "${existingSystemPrompt.content}\n\n[COMPRESSED_HISTORY] $summaryContent"
+                session.messages[lastSystemPromptIndex] = existingSystemPrompt.copy(content = updatedContent)
+            } else {
+                // Если системного промпта нет, добавляем summary как новое сообщение
+                val summaryMessage = Message(
+                    role = Message.ROLE_SYSTEM,
+                    content = "[COMPRESSED_HISTORY] $summaryContent"
+                )
+                session.messages.add(0, summaryMessage)
+            }
+            
+            logger.info("Компрессия истории диалога по токенам завершена: удалено ${indicesToRemove.size} сообщений, создан summary длиной ${summaryContent.length}")
+        }.onFailure { error ->
+            logger.error("Ошибка компрессии истории диалога по токенам: ${error.message}", error)
         }
     }
     

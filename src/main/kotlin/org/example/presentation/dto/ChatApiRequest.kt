@@ -17,7 +17,8 @@ data class ChatApiRequest(
     val outputSchema: String? = null,
     val maxRounds: Int? = null,
     val temperature: Double? = null,
-    val compressionThreshold: Int? = null
+    val compressionMessagesThreshold: Int? = null,
+    val compressionTokensThreshold: Int? = null
 )
 
 

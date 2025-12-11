@@ -13,7 +13,8 @@ object ErrorHandler {
             is DomainException -> {
                 val statusCode = when (error) {
                     is DomainException.EmptyMessageException,
-                    is DomainException.InvalidMaxRoundsException -> HttpStatusCode.BadRequest
+                    is DomainException.InvalidMaxRoundsException,
+                    is DomainException.BothCompressionThresholdsException -> HttpStatusCode.BadRequest
                     is DomainException.DialogCompletedException,
                     is DomainException.MaxRoundsExceededException -> HttpStatusCode.BadRequest
                 }

@@ -23,6 +23,11 @@ sealed class DomainException(message: String, val code: String) : Exception(mess
         "Превышен лимит раундов",
         "MAX_ROUNDS_EXCEEDED"
     )
+    
+    class BothCompressionThresholdsException : DomainException(
+        "Нельзя указывать одновременно compressionMessagesThreshold и compressionTokensThreshold",
+        "BOTH_COMPRESSION_THRESHOLDS"
+    )
 }
 
 

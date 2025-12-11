@@ -14,7 +14,8 @@ data class DialogSession(
     val createdAt: Long,
     var lastActivityAt: Long,
     val initialUserMessage: String,
-    var isComplete: Boolean = false
+    var isComplete: Boolean = false,
+    var accumulatedTotalTokens: Int = 0
 ) {
     fun addUserMessage(message: String) {
         messages.add(Message(role = Message.ROLE_USER, content = message))
