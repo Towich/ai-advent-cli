@@ -106,7 +106,11 @@ class SendChatMessageUseCase(
                     }
                     
                     compressResult.fold(
-                        onSuccess = { wasCompressed = true },
+                        onSuccess = { 
+                            wasCompressed = true
+                            // Сохранить сессию после компрессии
+                            sessionRepository.updateSession(session)
+                        },
                         onFailure = { error ->
                             // Логируем ошибку, но продолжаем выполнение
                             // Логирование будет добавлено в CompressDialogHistoryUseCase
@@ -170,6 +174,9 @@ class SendChatMessageUseCase(
                 if (isComplete) {
                     session.isComplete = true
                 }
+                
+                // Сохранить сессию в файл
+                sessionRepository.updateSession(session)
                 
                 // Подсчитываем количество символов во всех сообщениях (включая системное, пользователя и ассистента)
                 val totalCharactersCount = MessageCharacterCounter.countTotalCharacters(session.messages)

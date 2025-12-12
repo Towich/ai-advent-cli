@@ -1,17 +1,25 @@
 package org.example.data.repository
 
+import org.example.data.service.MemoryStorageService
 import org.example.domain.model.DialogSession
 import org.example.domain.repository.SessionRepository
 import org.slf4j.LoggerFactory
 
 /**
- * Реализация репозитория для хранения одной сессии в памяти
+ * Реализация репозитория для хранения одной сессии в памяти с сохранением в JSON-файл
  */
-class SessionRepositoryImpl : SessionRepository {
+class SessionRepositoryImpl(
+    private val memoryStorageService: MemoryStorageService = MemoryStorageService()
+) : SessionRepository {
     private val logger = LoggerFactory.getLogger(SessionRepositoryImpl::class.java)
     
     @Volatile
     private var currentSession: DialogSession? = null
+    
+    init {
+        // Загружаем сессию из файла при инициализации
+        loadSessionFromStorage()
+    }
     
     override fun createOrResetSession(
         systemPrompt: String?,
@@ -39,6 +47,7 @@ class SessionRepositoryImpl : SessionRepository {
         )
         
         currentSession = session
+        saveSessionToStorage()
         logger.info("Создана новая сессия диалога: модель=$model, maxRounds=$maxRounds, maxTokens=$maxTokens, disableSearch=$disableSearch")
         return session
     }
@@ -47,14 +56,52 @@ class SessionRepositoryImpl : SessionRepository {
         return currentSession
     }
     
+    /**
+     * Обновляет текущую сессию и сохраняет её в файл
+     */
+    override fun updateSession(session: DialogSession) {
+        currentSession = session
+        saveSessionToStorage()
+    }
+    
     override fun clearSession() {
         logger.debug("Сессия диалога очищена")
         currentSession = null
+        saveSessionToStorage() // Сохраняем null, чтобы удалить файл
     }
     
     override fun shutdown() {
-        logger.debug("SessionRepository остановлен")
-        currentSession = null
+        // Сохраняем сессию перед завершением
+        saveSessionToStorage()
+        logger.debug("SessionRepository остановлен, сессия сохранена")
+    }
+    
+    /**
+     * Загружает сессию из файла при старте
+     */
+    private fun loadSessionFromStorage() {
+        memoryStorageService.loadSession()
+            .onSuccess { session ->
+                if (session != null) {
+                    currentSession = session
+                    logger.info("Сессия восстановлена из внешней памяти: round=${session.currentRound}/${session.maxRounds}, messages=${session.messages.size}")
+                } else {
+                    logger.debug("Сохраненная сессия не найдена")
+                }
+            }
+            .onFailure { error ->
+                logger.warn("Не удалось загрузить сессию из файла: ${error.message}")
+            }
+    }
+    
+    /**
+     * Сохраняет текущую сессию в файл
+     */
+    private fun saveSessionToStorage() {
+        memoryStorageService.saveSession(currentSession)
+            .onFailure { error ->
+                logger.warn("Не удалось сохранить сессию в файл: ${error.message}")
+            }
     }
 }
 

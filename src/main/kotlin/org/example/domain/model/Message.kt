@@ -1,8 +1,11 @@
 package org.example.domain.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * Domain модель сообщения в диалоге
  */
+@Serializable
 data class Message(
     val role: String,
     val content: String

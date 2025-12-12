@@ -1,8 +1,11 @@
 package org.example.domain.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * Domain модель сессии диалога
  */
+@Serializable
 data class DialogSession(
     val systemPrompt: String?,
     val messages: MutableList<Message>,

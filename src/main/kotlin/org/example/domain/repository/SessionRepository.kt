@@ -29,6 +29,11 @@ interface SessionRepository {
     fun clearSession()
     
     /**
+     * Обновить текущую сессию (для сохранения изменений)
+     */
+    fun updateSession(session: DialogSession)
+    
+    /**
      * Завершить работу репозитория
      */
     fun shutdown()
