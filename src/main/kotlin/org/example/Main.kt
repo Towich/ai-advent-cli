@@ -10,6 +10,7 @@ import io.ktor.server.routing.*
 import kotlinx.serialization.json.Json
 import org.example.data.repository.GigaChatRepositoryImpl
 import org.example.data.repository.HuggingFaceRepositoryImpl
+import org.example.data.repository.McpRepositoryImpl
 import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
 import org.example.domain.usecase.CompressDialogHistoryUseCase
@@ -17,6 +18,7 @@ import org.example.domain.usecase.SendChatMessageUseCase
 import org.example.domain.usecase.SendMultiChatMessageUseCase
 import org.example.infrastructure.config.AppConfig
 import org.example.presentation.controller.ChatController
+import org.example.presentation.controller.McpController
 import org.slf4j.LoggerFactory
 
 private val logger = LoggerFactory.getLogger("org.example.MainKt")
@@ -85,9 +87,18 @@ fun Application.module() {
         sendMultiChatMessageUseCase = sendMultiChatMessageUseCase
     )
     
+    val mcpRepository = McpRepositoryImpl(
+        serverUrl = AppConfig.mcpServerUrl
+    )
+    
+    val mcpController = McpController(
+        mcpRepository = mcpRepository
+    )
+    
     // Настройка маршрутов
     routing {
         chatController.configureRoutes(this)
+        mcpController.configureRoutes(this)
     }
     
     // Очистка ресурсов при остановке
@@ -96,6 +107,7 @@ fun Application.module() {
         perplexityRepository.close()
         gigaChatRepository.close()
         huggingFaceRepository.close()
+        mcpRepository.close()
         sessionRepository.shutdown()
     }
 }
