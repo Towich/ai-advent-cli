@@ -10,7 +10,6 @@ import io.ktor.server.routing.*
 import kotlinx.serialization.json.Json
 import org.example.data.repository.GigaChatRepositoryImpl
 import org.example.data.repository.HuggingFaceRepositoryImpl
-import org.example.data.repository.McpRepositoryImpl
 import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
 import org.example.domain.usecase.CompressDialogHistoryUseCase
@@ -87,13 +86,7 @@ fun Application.module() {
         sendMultiChatMessageUseCase = sendMultiChatMessageUseCase
     )
     
-    val mcpRepository = McpRepositoryImpl(
-        serverUrl = AppConfig.mcpServerUrl
-    )
-    
-    val mcpController = McpController(
-        mcpRepository = mcpRepository
-    )
+    val mcpController = McpController()
     
     // Настройка маршрутов
     routing {
@@ -107,7 +100,6 @@ fun Application.module() {
         perplexityRepository.close()
         gigaChatRepository.close()
         huggingFaceRepository.close()
-        mcpRepository.close()
         sessionRepository.shutdown()
     }
 }

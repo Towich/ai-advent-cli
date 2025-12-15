@@ -8,5 +8,6 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class McpCallToolRequest(
     val toolName: String,
-    val arguments: Map<String, String> = emptyMap()
+    val arguments: Map<String, String> = emptyMap(),
+    val mcpServerUrl: String
 )

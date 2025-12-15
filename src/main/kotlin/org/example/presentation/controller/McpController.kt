@@ -5,10 +5,11 @@ import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.request.*
-import org.example.domain.repository.McpRepository
+import org.example.data.repository.McpRepositoryImpl
 import org.example.presentation.dto.ErrorResponse
 import org.example.presentation.dto.McpCallToolRequest
 import org.example.presentation.dto.McpCallToolResponse
+import org.example.presentation.dto.McpListToolsRequest
 import org.example.presentation.dto.McpToolResponse
 import org.example.presentation.dto.McpToolsListResponse
 import org.slf4j.LoggerFactory
@@ -16,14 +17,12 @@ import org.slf4j.LoggerFactory
 /**
  * Контроллер для обработки запросов к MCP-серверу
  */
-class McpController(
-    private val mcpRepository: McpRepository
-) {
+class McpController {
     private val logger = LoggerFactory.getLogger(McpController::class.java)
     
     fun configureRoutes(routing: Routing) {
         routing {
-            get("/api/mcp/tools") {
+            post("/api/mcp/tools") {
                 handleListToolsRequest(call)
             }
             post("/api/mcp/tools/call") {
@@ -33,8 +32,28 @@ class McpController(
     }
     
     private suspend fun handleListToolsRequest(call: ApplicationCall) {
+        var mcpRepository: McpRepositoryImpl? = null
         try {
-            logger.info("Запрос списка инструментов MCP")
+            // Получаем URL MCP сервера из body запроса
+            val request = call.receive<McpListToolsRequest>()
+            
+            // Валидация
+            if (request.mcpServerUrl.isBlank()) {
+                logger.warn("Ошибка валидации: URL MCP сервера пустой")
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ErrorResponse(
+                        error = "URL MCP сервера не может быть пустым",
+                        code = "INVALID_REQUEST"
+                    )
+                )
+                return
+            }
+            
+            logger.info("Запрос списка инструментов MCP, URL: ${request.mcpServerUrl}")
+            
+            // Создаем репозиторий с URL из запроса
+            mcpRepository = McpRepositoryImpl(serverUrl = request.mcpServerUrl)
             
             val result = mcpRepository.listTools()
             
@@ -84,14 +103,18 @@ class McpController(
                     code = "INTERNAL_ERROR"
                 )
             )
+        } finally {
+            // Закрываем репозиторий после использования
+            mcpRepository?.close()
         }
     }
     
     private suspend fun handleCallToolRequest(call: ApplicationCall) {
+        var mcpRepository: McpRepositoryImpl? = null
         try {
             val request = call.receive<McpCallToolRequest>()
             
-            logger.info("Запрос на вызов инструмента MCP: toolName=${request.toolName}, arguments=${request.arguments}")
+            logger.info("Запрос на вызов инструмента MCP: toolName=${request.toolName}, arguments=${request.arguments}, mcpServerUrl=${request.mcpServerUrl}")
             
             // Валидация
             if (request.toolName.isBlank()) {
@@ -105,6 +128,21 @@ class McpController(
                 )
                 return
             }
+            
+            if (request.mcpServerUrl.isBlank()) {
+                logger.warn("Ошибка валидации: URL MCP сервера пустой")
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ErrorResponse(
+                        error = "URL MCP сервера не может быть пустым",
+                        code = "INVALID_REQUEST"
+                    )
+                )
+                return
+            }
+            
+            // Создаем репозиторий с URL из запроса
+            mcpRepository = McpRepositoryImpl(serverUrl = request.mcpServerUrl)
             
             val result = mcpRepository.callTool(request.toolName, request.arguments)
             
@@ -141,6 +179,9 @@ class McpController(
                     code = "INTERNAL_ERROR"
                 )
             )
+        } finally {
+            // Закрываем репозиторий после использования
+            mcpRepository?.close()
         }
     }
 }
