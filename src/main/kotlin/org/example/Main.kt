@@ -15,6 +15,7 @@ import org.example.data.repository.SessionRepositoryImpl
 import org.example.domain.usecase.CompressDialogHistoryUseCase
 import org.example.domain.usecase.SendChatMessageUseCase
 import org.example.domain.usecase.SendMultiChatMessageUseCase
+import org.example.domain.usecase.SendChatMessageWithToolsUseCase
 import org.example.infrastructure.config.AppConfig
 import org.example.presentation.controller.ChatController
 import org.example.presentation.controller.McpController
@@ -81,9 +82,18 @@ fun Application.module() {
         defaultMaxTokens = AppConfig.maxTokens
     )
     
+    val sendChatMessageWithToolsUseCase = SendChatMessageWithToolsUseCase(
+        perplexityRepository = perplexityRepository,
+        gigaChatRepository = gigaChatRepository,
+        huggingFaceRepository = huggingFaceRepository,
+        defaultModel = AppConfig.model,
+        defaultMaxTokens = AppConfig.maxTokens
+    )
+    
     val chatController = ChatController(
         sendChatMessageUseCase = sendChatMessageUseCase,
-        sendMultiChatMessageUseCase = sendMultiChatMessageUseCase
+        sendMultiChatMessageUseCase = sendMultiChatMessageUseCase,
+        sendChatMessageWithToolsUseCase = sendChatMessageWithToolsUseCase
     )
     
     val mcpController = McpController()

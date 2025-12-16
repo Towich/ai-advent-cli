@@ -8,8 +8,11 @@ import io.ktor.server.routing.*
 import org.example.domain.model.ChatRequest
 import org.example.domain.usecase.SendChatMessageUseCase
 import org.example.domain.usecase.SendMultiChatMessageUseCase
+import org.example.domain.usecase.SendChatMessageWithToolsUseCase
 import org.example.presentation.dto.ChatApiRequest
 import org.example.presentation.dto.ChatApiResponse
+import org.example.presentation.dto.ChatWithToolsApiRequest
+import org.example.presentation.dto.ChatWithToolsApiResponse
 import org.example.presentation.dto.ErrorResponse
 import org.example.presentation.dto.MultiChatApiRequest
 import org.example.presentation.dto.MultiChatApiResponse
@@ -23,7 +26,8 @@ import org.slf4j.LoggerFactory
  */
 class ChatController(
     private val sendChatMessageUseCase: SendChatMessageUseCase,
-    private val sendMultiChatMessageUseCase: SendMultiChatMessageUseCase
+    private val sendMultiChatMessageUseCase: SendMultiChatMessageUseCase,
+    private val sendChatMessageWithToolsUseCase: SendChatMessageWithToolsUseCase
 ) {
     private val logger = LoggerFactory.getLogger(ChatController::class.java)
     fun configureRoutes(routing: Routing) {
@@ -33,6 +37,9 @@ class ChatController(
             }
             post("/api/chat/multi") {
                 handleMultiChatRequest(call)
+            }
+            post("/api/chat/tools") {
+                handleChatWithToolsRequest(call)
             }
         }
     }
@@ -279,6 +286,113 @@ class ChatController(
             totalTokens = totalTokens.takeIf { it > 0 },
             cost = totalCost.takeIf { it > 0.0 }
         )
+    }
+
+    private suspend fun handleChatWithToolsRequest(call: ApplicationCall) {
+        try {
+            val request = call.receive<ChatWithToolsApiRequest>()
+
+            // Логируем запрос от юзера
+            logger.info("Запрос от юзера [tools]: vendor=${request.vendor}, model=${request.model ?: "default"}, messageLength=${request.message.length}, mcpServerUrl=${request.mcpServerUrl}, maxToolIterations=${request.maxToolIterations ?: 10}")
+
+            // Валидация
+            if (request.message.isBlank()) {
+                logger.warn("Ошибка валидации: сообщение пустое")
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ErrorResponse(
+                        error = "Сообщение не может быть пустым",
+                        code = "INVALID_REQUEST"
+                    )
+                )
+                return
+            }
+
+            if (request.mcpServerUrl.isBlank()) {
+                logger.warn("Ошибка валидации: URL MCP сервера пустой")
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ErrorResponse(
+                        error = "URL MCP сервера не может быть пустым",
+                        code = "INVALID_REQUEST"
+                    )
+                )
+                return
+            }
+
+            val maxToolIterations = request.maxToolIterations ?: 10
+            if (maxToolIterations < 1 || maxToolIterations > 50) {
+                logger.warn("Ошибка валидации: maxToolIterations должен быть от 1 до 50")
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ErrorResponse(
+                        error = "maxToolIterations должен быть от 1 до 50",
+                        code = "INVALID_REQUEST"
+                    )
+                )
+                return
+            }
+
+            // Выполняем use case
+            val result = sendChatMessageWithToolsUseCase.execute(
+                message = request.message,
+                vendor = request.vendor,
+                model = request.model,
+                maxTokens = request.maxTokens,
+                disableSearch = request.disableSearch,
+                systemPrompt = request.systemPrompt,
+                outputFormat = request.outputFormat,
+                outputSchema = request.outputSchema,
+                temperature = request.temperature,
+                mcpServerUrl = request.mcpServerUrl,
+                maxToolIterations = maxToolIterations
+            )
+
+            result.fold(
+                onSuccess = { chatResult ->
+                    // Логируем ответ юзеру
+                    val usageInfo = chatResult.usage?.let {
+                        "promptTokens=${it.promptTokens}, completionTokens=${it.completionTokens}, totalTokens=${it.totalTokens}, cost=$${it.cost?.let { String.format("%.6f", it) } ?: "N/A"}"
+                    } ?: "N/A"
+                    logger.info("Ответ юзеру [tools]: модель=${chatResult.model}, длина=${chatResult.content.length}, toolIterations=${chatResult.totalToolIterations}, toolCalls=${chatResult.toolCalls.size}, executionTime=${chatResult.executionTimeMs}ms, $usageInfo")
+
+                    val usage = chatResult.usage?.let {
+                        org.example.presentation.dto.Usage(
+                            prompt_tokens = it.promptTokens,
+                            completion_tokens = it.completionTokens,
+                            totalTokens = it.totalTokens,
+                            cost = it.cost
+                        )
+                    }
+
+                    call.respond(
+                        HttpStatusCode.OK,
+                        ChatWithToolsApiResponse(
+                            content = chatResult.content,
+                            model = chatResult.model,
+                            executionTimeMs = chatResult.executionTimeMs,
+                            usage = usage,
+                            toolCalls = chatResult.toolCalls,
+                            totalToolIterations = chatResult.totalToolIterations
+                        )
+                    )
+                },
+                onFailure = { error ->
+                    logger.error("Ошибка при обработке запроса [tools]: ${error.message}", error)
+                    val (statusCode, errorResponse) = ErrorHandler.handleError(error)
+                    call.respond(statusCode, errorResponse)
+                }
+            )
+        } catch (e: Exception) {
+            logger.error("Необработанное исключение при обработке запроса [tools]: ${e.message}", e)
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ErrorResponse(
+                    error = "Ошибка при обработке запроса: ${e.message}",
+                    code = "INVALID_REQUEST"
+                )
+            )
+        }
     }
 }
 
