@@ -7,6 +7,8 @@ import io.ktor.server.netty.*
 import io.ktor.server.plugins.callloging.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.Job
+import org.example.application.ChatWithToolsService
 import kotlinx.serialization.json.Json
 import org.example.data.repository.GigaChatRepositoryImpl
 import org.example.data.repository.HuggingFaceRepositoryImpl
@@ -17,6 +19,8 @@ import org.example.domain.usecase.SendChatMessageUseCase
 import org.example.domain.usecase.SendMultiChatMessageUseCase
 import org.example.domain.usecase.SendChatMessageWithToolsUseCase
 import org.example.infrastructure.config.AppConfig
+import org.example.infrastructure.notification.TelegramNotifier
+import org.example.infrastructure.scheduler.ReminderSummaryScheduler
 import org.example.presentation.controller.ChatController
 import org.example.presentation.controller.McpController
 import org.slf4j.LoggerFactory
@@ -89,6 +93,24 @@ fun Application.module() {
         defaultModel = AppConfig.model,
         defaultMaxTokens = AppConfig.maxTokens
     )
+
+    val chatWithToolsService = ChatWithToolsService(sendChatMessageWithToolsUseCase)
+
+    val telegramNotifier = run {
+        val token = AppConfig.telegramBotToken
+        val chatId = AppConfig.telegramChatId
+        if (!token.isNullOrBlank() && !chatId.isNullOrBlank()) {
+            TelegramNotifier(botToken = token, chatId = chatId)
+        } else {
+            null
+        }
+    }
+
+    val reminderSummaryScheduler = ReminderSummaryScheduler(
+        chatWithToolsService = chatWithToolsService,
+        telegramNotifier = telegramNotifier
+    )
+    val reminderJob: Job = reminderSummaryScheduler.start(this)
     
     val chatController = ChatController(
         sendChatMessageUseCase = sendChatMessageUseCase,
@@ -107,6 +129,8 @@ fun Application.module() {
     // Очистка ресурсов при остановке
     environment.monitor.subscribe(ApplicationStopped) {
         logger.info("Остановка сервера, очистка ресурсов")
+        reminderJob.cancel()
+        telegramNotifier?.close()
         perplexityRepository.close()
         gigaChatRepository.close()
         huggingFaceRepository.close()

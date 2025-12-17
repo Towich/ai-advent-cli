@@ -5,6 +5,7 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import org.example.application.ChatWithToolsService
 import org.example.domain.model.ChatRequest
 import org.example.domain.usecase.SendChatMessageUseCase
 import org.example.domain.usecase.SendMultiChatMessageUseCase
@@ -30,6 +31,7 @@ class ChatController(
     private val sendChatMessageWithToolsUseCase: SendChatMessageWithToolsUseCase
 ) {
     private val logger = LoggerFactory.getLogger(ChatController::class.java)
+    private val chatWithToolsService = ChatWithToolsService(sendChatMessageWithToolsUseCase)
     fun configureRoutes(routing: Routing) {
         routing {
             post("/api/chat") {
@@ -295,57 +297,20 @@ class ChatController(
             // Логируем запрос от юзера
             logger.info("Запрос от юзера [tools]: vendor=${request.vendor}, model=${request.model ?: "default"}, messageLength=${request.message.length}, mcpServerUrl=${request.mcpServerUrl}, maxToolIterations=${request.maxToolIterations ?: 10}")
 
-            // Валидация
-            if (request.message.isBlank()) {
-                logger.warn("Ошибка валидации: сообщение пустое")
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    ErrorResponse(
-                        error = "Сообщение не может быть пустым",
-                        code = "INVALID_REQUEST"
-                    )
+            val result = chatWithToolsService.execute(
+                ChatWithToolsService.Command(
+                    message = request.message,
+                    vendor = request.vendor,
+                    model = request.model,
+                    maxTokens = request.maxTokens,
+                    disableSearch = request.disableSearch,
+                    systemPrompt = request.systemPrompt,
+                    outputFormat = request.outputFormat,
+                    outputSchema = request.outputSchema,
+                    temperature = request.temperature,
+                    mcpServerUrl = request.mcpServerUrl,
+                    maxToolIterations = request.maxToolIterations
                 )
-                return
-            }
-
-            if (request.mcpServerUrl.isBlank()) {
-                logger.warn("Ошибка валидации: URL MCP сервера пустой")
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    ErrorResponse(
-                        error = "URL MCP сервера не может быть пустым",
-                        code = "INVALID_REQUEST"
-                    )
-                )
-                return
-            }
-
-            val maxToolIterations = request.maxToolIterations ?: 10
-            if (maxToolIterations < 1 || maxToolIterations > 50) {
-                logger.warn("Ошибка валидации: maxToolIterations должен быть от 1 до 50")
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    ErrorResponse(
-                        error = "maxToolIterations должен быть от 1 до 50",
-                        code = "INVALID_REQUEST"
-                    )
-                )
-                return
-            }
-
-            // Выполняем use case
-            val result = sendChatMessageWithToolsUseCase.execute(
-                message = request.message,
-                vendor = request.vendor,
-                model = request.model,
-                maxTokens = request.maxTokens,
-                disableSearch = request.disableSearch,
-                systemPrompt = request.systemPrompt,
-                outputFormat = request.outputFormat,
-                outputSchema = request.outputSchema,
-                temperature = request.temperature,
-                mcpServerUrl = request.mcpServerUrl,
-                maxToolIterations = maxToolIterations
             )
 
             result.fold(
@@ -378,6 +343,17 @@ class ChatController(
                     )
                 },
                 onFailure = { error ->
+                    if (error is IllegalArgumentException) {
+                        logger.warn("Ошибка валидации [tools]: ${error.message}")
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            ErrorResponse(
+                                error = error.message ?: "Ошибка валидации",
+                                code = "INVALID_REQUEST"
+                            )
+                        )
+                        return@fold
+                    }
                     logger.error("Ошибка при обработке запроса [tools]: ${error.message}", error)
                     val (statusCode, errorResponse) = ErrorHandler.handleError(error)
                     call.respond(statusCode, errorResponse)
