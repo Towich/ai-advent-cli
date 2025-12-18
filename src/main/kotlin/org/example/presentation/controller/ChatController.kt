@@ -295,7 +295,7 @@ class ChatController(
             val request = call.receive<ChatWithToolsApiRequest>()
 
             // Логируем запрос от юзера
-            logger.info("Запрос от юзера [tools]: vendor=${request.vendor}, model=${request.model ?: "default"}, messageLength=${request.message.length}, mcpServerUrl=${request.mcpServerUrl}, maxToolIterations=${request.maxToolIterations ?: 10}")
+            logger.info("Запрос от юзера [tools]: vendor=${request.vendor}, model=${request.model ?: "default"}, messageLength=${request.message.length}, mcpServerUrls=${request.mcpServerUrls.joinToString(", ")}, maxToolIterations=${request.maxToolIterations ?: 10}")
 
             val result = chatWithToolsService.execute(
                 ChatWithToolsService.Command(
@@ -308,7 +308,7 @@ class ChatController(
                     outputFormat = request.outputFormat,
                     outputSchema = request.outputSchema,
                     temperature = request.temperature,
-                    mcpServerUrl = request.mcpServerUrl,
+                    mcpServerUrls = request.mcpServerUrls,
                     maxToolIterations = request.maxToolIterations
                 )
             )

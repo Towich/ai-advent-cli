@@ -47,7 +47,7 @@ class McpRepositoryImpl(
         }
 
         engine {
-            requestTimeout = 30000 // 30 секунд
+            requestTimeout = 90000 // 90 секунд
         }
     }
 
@@ -367,7 +367,8 @@ class McpRepositoryImpl(
                         McpTool(
                             name = name,
                             description = description,
-                            inputSchema = inputSchema
+                            inputSchema = inputSchema,
+                            serverUrl = serverUrl
                         )
                     }.filterNotNull()
 

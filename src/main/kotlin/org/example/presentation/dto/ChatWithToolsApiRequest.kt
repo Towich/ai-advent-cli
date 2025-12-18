@@ -16,7 +16,7 @@ data class ChatWithToolsApiRequest(
     val outputFormat: String? = null,
     val outputSchema: String? = null,
     val temperature: Double? = null,
-    val mcpServerUrl: String,
+    val mcpServerUrls: List<String>,
     val maxToolIterations: Int? = 10 // Максимальное количество итераций вызова тулзов
 )
 

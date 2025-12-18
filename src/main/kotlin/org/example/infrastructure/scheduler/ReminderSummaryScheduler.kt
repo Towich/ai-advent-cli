@@ -22,7 +22,7 @@ class ReminderSummaryScheduler(
         val intervalMs = AppConfig.reminderSummaryIntervalMs
         require(intervalMs >= 5_000L) { "REMINDER_SUMMARY_INTERVAL_MS слишком маленький (min 5000ms)" }
 
-        logger.info("ReminderSummaryScheduler включен: intervalMs=$intervalMs, mcpServerUrl=${AppConfig.mcpServerUrl}")
+        logger.info("ReminderSummaryScheduler включен: intervalMs=$intervalMs, mcpServerUrls=${AppConfig.mcpServerUrls.joinToString(", ")}")
 
         return scope.launch(Dispatchers.Default + SupervisorJob()) {
             while (isActive) {
@@ -75,7 +75,7 @@ class ReminderSummaryScheduler(
                 outputFormat = null,
                 outputSchema = null,
                 temperature = 0.2,
-                mcpServerUrl = AppConfig.mcpServerUrl,
+                mcpServerUrls = AppConfig.mcpServerUrls,
                 maxToolIterations = AppConfig.reminderSummaryMaxToolIterations
             )
         )

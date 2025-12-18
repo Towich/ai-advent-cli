@@ -27,7 +27,7 @@ class TelegramBotService(
     private val chatWithToolsService: ChatWithToolsService,
     private val defaultVendor: String = "perplexity",
     private val defaultModel: String? = null,
-    private val defaultMcpServerUrl: String = "http://localhost:8002/mcp",
+    private val defaultMcpServerUrls: List<String> = listOf("http://localhost:8002/mcp"),
     private val defaultMaxToolIterations: Int = 10
 ) {
     private val logger = LoggerFactory.getLogger(TelegramBotService::class.java)
@@ -161,10 +161,11 @@ class TelegramBotService(
 
         // Упрощенный формат сообщения с action
         val action = toolCall.arguments["action"] ?: ""
+        val serverInfo = toolCall.serverUrl ?: defaultMcpServerUrls.firstOrNull() ?: "неизвестный сервер"
         val message = if (action.isNotEmpty()) {
-            "🔧 Использую инструмент: ${toolCall.toolName} (action=$action)... (MCP=$defaultMcpServerUrl)"
+            "🔧 Использую инструмент: ${toolCall.toolName} (action=$action)... (MCP=$serverInfo)"
         } else {
-            "🔧 Использую инструмент: ${toolCall.toolName}... (MCP=$defaultMcpServerUrl)"
+            "🔧 Использую инструмент: ${toolCall.toolName}... (MCP=$serverInfo)"
         }
 
         logger.info("Отправляю уведомление о туле ${toolCall.toolName} в чат $chatId")
@@ -208,7 +209,7 @@ class TelegramBotService(
                             message = message,
                             vendor = defaultVendor,
                             model = defaultModel,
-                            mcpServerUrl = defaultMcpServerUrl,
+                            mcpServerUrls = defaultMcpServerUrls,
                             maxToolIterations = defaultMaxToolIterations,
                             onToolCall = onToolCall
                         )

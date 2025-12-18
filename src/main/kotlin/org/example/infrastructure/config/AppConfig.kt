@@ -56,9 +56,24 @@ object AppConfig {
     
     /**
      * URL MCP (Model Context Protocol) сервера
+     * Поддерживает как один URL, так и несколько URL через запятую
      */
+    val mcpServerUrls: List<String>
+        get() {
+            val envValue = System.getenv("MCP_SERVER_URL") ?: System.getenv("MCP_SERVER_URLS")
+            return if (envValue != null) {
+                envValue.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            } else {
+                listOf(DEFAULT_MCP_SERVER_URL)
+            }
+        }
+    
+    /**
+     * @deprecated Используйте mcpServerUrls вместо этого
+     */
+    @Deprecated("Используйте mcpServerUrls", ReplaceWith("mcpServerUrls.firstOrNull() ?: DEFAULT_MCP_SERVER_URL"))
     val mcpServerUrl: String
-        get() = System.getenv("MCP_SERVER_URL") ?: DEFAULT_MCP_SERVER_URL
+        get() = mcpServerUrls.firstOrNull() ?: DEFAULT_MCP_SERVER_URL
 
     /**
      * Периодическая сводка задач (через /api/chat/tools -> MCP reminder tool)

@@ -59,29 +59,73 @@ class SendChatMessageWithToolsUseCase(
         outputFormat: String?,
         outputSchema: String?,
         temperature: Double?,
-        mcpServerUrl: String,
+        mcpServerUrls: List<String>,
         maxToolIterations: Int,
         onToolCall: (suspend (ToolCallInfo) -> Unit)? = null
     ): Result<ChatWithToolsResult> {
         val startTime = System.currentTimeMillis()
-        var mcpRepository: McpRepositoryImpl? = null
+        val mcpRepositories = mutableMapOf<String, McpRepositoryImpl>()
         
         return try {
-            // Создаем MCP репозиторий
-            mcpRepository = McpRepositoryImpl(serverUrl = mcpServerUrl)
-            
-            // Получаем список тулзов
-            val toolsResult = mcpRepository.listTools()
-            val tools = toolsResult.getOrElse { error ->
-                logger.error("Ошибка при получении списка тулзов: ${error.message}")
-                return Result.failure(Exception("Не удалось получить список тулзов: ${error.message}"))
+            // Создаем MCP репозитории для каждого сервера
+            mcpServerUrls.forEach { serverUrl ->
+                try {
+                    val repository = McpRepositoryImpl(serverUrl = serverUrl)
+                    mcpRepositories[serverUrl] = repository
+                    logger.info("Создан MCP репозиторий для сервера: $serverUrl")
+                } catch (e: Exception) {
+                    logger.error("Ошибка при создании репозитория для сервера $serverUrl: ${e.message}", e)
+                }
             }
             
-            if (tools.isEmpty()) {
-                return Result.failure(Exception("MCP-сервер не предоставил ни одного тула"))
+            if (mcpRepositories.isEmpty()) {
+                return Result.failure(Exception("Не удалось создать ни одного MCP репозитория"))
             }
             
-            logger.info("Получено ${tools.size} тулзов от MCP-сервера")
+            // Получаем список тулзов от всех серверов
+            val allTools = mutableListOf<McpTool>()
+            val failedServers = mutableListOf<String>()
+            
+            mcpRepositories.forEach { (serverUrl, repository) ->
+                try {
+                    val toolsResult = repository.listTools()
+                    toolsResult.fold(
+                        onSuccess = { tools ->
+                            // Добавляем информацию о сервере к каждому инструменту
+                            val toolsWithServer = tools.map { tool ->
+                                tool.copy(serverUrl = serverUrl)
+                            }
+                            allTools.addAll(toolsWithServer)
+                            logger.info("Получено ${tools.size} тулзов от MCP-сервера: $serverUrl")
+                        },
+                        onFailure = { error ->
+                            logger.error("Ошибка при получении списка тулзов от сервера $serverUrl: ${error.message}")
+                            failedServers.add(serverUrl)
+                        }
+                    )
+                } catch (e: Exception) {
+                    logger.error("Исключение при получении тулзов от сервера $serverUrl: ${e.message}", e)
+                    failedServers.add(serverUrl)
+                }
+            }
+            
+            // Если все серверы не удались, возвращаем ошибку
+            if (allTools.isEmpty()) {
+                val errorMsg = if (failedServers.size == mcpServerUrls.size) {
+                    "Не удалось получить тулзы ни от одного MCP-сервера. Ошибки: ${failedServers.joinToString(", ")}"
+                } else {
+                    "MCP-серверы не предоставили ни одного тула"
+                }
+                return Result.failure(Exception(errorMsg))
+            }
+            
+            // Если некоторые серверы не удались, логируем предупреждение, но продолжаем работу
+            if (failedServers.isNotEmpty()) {
+                logger.warn("Не удалось получить тулзы от некоторых серверов: ${failedServers.joinToString(", ")}. Продолжаем работу с доступными тулзами.")
+            }
+            
+            logger.info("Всего получено ${allTools.size} тулзов от ${mcpRepositories.size - failedServers.size} MCP-серверов")
+            val tools = allTools
             
             // Определяем вендора
             val vendorEnum = VendorDetector.parseVendor(vendor)
@@ -144,8 +188,57 @@ class SendChatMessageWithToolsUseCase(
                     // Это вызов тула
                     logger.info("Обнаружен вызов тула: ${toolCall.toolName} с аргументами: ${toolCall.arguments}")
                     
+                    // Находим инструмент и определяем, к какому серверу он принадлежит
+                    val tool = tools.find { it.name == toolCall.toolName }
+                    val serverUrl = tool?.serverUrl
+                    
+                    if (serverUrl == null) {
+                        logger.error("Не удалось найти сервер для инструмента: ${toolCall.toolName}")
+                        val errorToolCallInfo = ToolCallInfo(
+                            toolName = toolCall.toolName,
+                            arguments = toolCall.arguments,
+                            result = "Ошибка: Инструмент не найден ни на одном из подключенных MCP-серверов",
+                            success = false,
+                            serverUrl = null
+                        )
+                        toolCalls.add(errorToolCallInfo)
+                        onToolCall?.invoke(errorToolCallInfo)
+                        messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))
+                        messages.add(
+                            Message(
+                                role = Message.ROLE_USER,
+                                content = "Ошибка: Инструмент ${toolCall.toolName} не найден ни на одном из подключенных MCP-серверов. Используйте другой инструмент или предоставьте финальный ответ."
+                            )
+                        )
+                        continue
+                    }
+                    
+                    val repository = mcpRepositories[serverUrl]
+                    if (repository == null) {
+                        logger.error("Репозиторий для сервера $serverUrl не найден")
+                        val errorToolCallInfo = ToolCallInfo(
+                            toolName = toolCall.toolName,
+                            arguments = toolCall.arguments,
+                            result = "Ошибка: Репозиторий для сервера $serverUrl не найден",
+                            success = false,
+                            serverUrl = serverUrl
+                        )
+                        toolCalls.add(errorToolCallInfo)
+                        onToolCall?.invoke(errorToolCallInfo)
+                        messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))
+                        messages.add(
+                            Message(
+                                role = Message.ROLE_USER,
+                                content = "Ошибка: Не удалось найти репозиторий для сервера $serverUrl. Используйте другой инструмент или предоставьте финальный ответ."
+                            )
+                        )
+                        continue
+                    }
+                    
+                    logger.info("Выполняю тул ${toolCall.toolName} на сервере: $serverUrl")
+                    
                     // Выполняем тул
-                    val toolResult = mcpRepository.callTool(toolCall.toolName, toolCall.arguments)
+                    val toolResult = repository.callTool(toolCall.toolName, toolCall.arguments)
                     
                     toolResult.fold(
                         onSuccess = { result ->
@@ -156,7 +249,8 @@ class SendChatMessageWithToolsUseCase(
                                 toolName = toolCall.toolName,
                                 arguments = toolCall.arguments,
                                 result = result,
-                                success = true
+                                success = true,
+                                serverUrl = serverUrl
                             )
                             toolCalls.add(toolCallInfo)
                             
@@ -186,7 +280,8 @@ class SendChatMessageWithToolsUseCase(
                                 toolName = toolCall.toolName,
                                 arguments = toolCall.arguments,
                                 result = "Ошибка: ${error.message}",
-                                success = false
+                                success = false,
+                                serverUrl = serverUrl
                             )
                             toolCalls.add(errorToolCallInfo)
                             
@@ -251,7 +346,14 @@ class SendChatMessageWithToolsUseCase(
             logger.error("Ошибка при выполнении UseCase: ${e.message}", e)
             Result.failure(e)
         } finally {
-            mcpRepository?.close()
+            // Закрываем все репозитории
+            mcpRepositories.values.forEach { repository ->
+                try {
+                    repository.close()
+                } catch (e: Exception) {
+                    logger.error("Ошибка при закрытии репозитория: ${e.message}", e)
+                }
+            }
         }
     }
     
@@ -277,6 +379,7 @@ class SendChatMessageWithToolsUseCase(
             tools.forEachIndexed { index, tool ->
                 append("${index + 1}) ${tool.name}")
                 tool.description?.let { append(": $it") }
+                tool.serverUrl?.let { append(" [MCP: $it]") }
                 append("\n")
                 
                 // Описываем схему аргументов

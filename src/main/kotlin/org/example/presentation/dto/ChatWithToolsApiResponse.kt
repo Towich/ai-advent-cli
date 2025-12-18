@@ -23,6 +23,7 @@ data class ToolCallInfo(
     val toolName: String,
     val arguments: Map<String, String>,
     val result: String? = null,
-    val success: Boolean
+    val success: Boolean,
+    val serverUrl: String? = null // URL MCP-сервера, на котором был вызван инструмент
 )
 

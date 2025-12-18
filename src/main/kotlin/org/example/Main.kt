@@ -130,7 +130,7 @@ fun Application.module() {
                     chatWithToolsService = chatWithToolsService,
                     defaultVendor = AppConfig.telegramBotDefaultVendor,
                     defaultModel = AppConfig.telegramBotDefaultModel,
-                    defaultMcpServerUrl = AppConfig.mcpServerUrl,
+                    defaultMcpServerUrls = AppConfig.mcpServerUrls,
                     defaultMaxToolIterations = AppConfig.telegramBotDefaultMaxToolIterations
                 )
             }

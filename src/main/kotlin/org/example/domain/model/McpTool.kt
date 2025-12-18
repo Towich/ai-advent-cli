@@ -9,6 +9,7 @@ package org.example.domain.model
 data class McpTool(
     val name: String,
     val description: String? = null,
-    val inputSchema: Map<String, kotlinx.serialization.json.JsonElement>? = null
+    val inputSchema: Map<String, kotlinx.serialization.json.JsonElement>? = null,
+    val serverUrl: String? = null // URL MCP-сервера, откуда пришел этот инструмент
 )
 

@@ -20,7 +20,7 @@ class ChatWithToolsService(
         val outputFormat: String? = null,
         val outputSchema: String? = null,
         val temperature: Double? = null,
-        val mcpServerUrl: String,
+        val mcpServerUrls: List<String>,
         val maxToolIterations: Int? = 10,
         val onToolCall: (suspend (ToolCallInfo) -> Unit)? = null
     )
@@ -39,7 +39,7 @@ class ChatWithToolsService(
             outputFormat = command.outputFormat,
             outputSchema = command.outputSchema,
             temperature = command.temperature,
-            mcpServerUrl = command.mcpServerUrl,
+            mcpServerUrls = command.mcpServerUrls,
             maxToolIterations = maxToolIterations,
             onToolCall = command.onToolCall
         )
@@ -47,7 +47,8 @@ class ChatWithToolsService(
 
     private fun validate(command: Command): String? {
         if (command.message.isBlank()) return "Сообщение не может быть пустым"
-        if (command.mcpServerUrl.isBlank()) return "URL MCP сервера не может быть пустым"
+        if (command.mcpServerUrls.isEmpty()) return "Необходимо указать хотя бы один URL MCP сервера"
+        if (command.mcpServerUrls.any { it.isBlank() }) return "URL MCP сервера не может быть пустым"
         val maxToolIterations = command.maxToolIterations ?: 10
         if (maxToolIterations < 1 || maxToolIterations > 50) return "maxToolIterations должен быть от 1 до 50"
         if (command.vendor.isBlank()) return "vendor не может быть пустым"
