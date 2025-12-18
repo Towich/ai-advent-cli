@@ -31,6 +31,8 @@ dependencies {
     // Logging
     implementation("ch.qos.logback:logback-classic:1.5.3")
     
+    // Telegram Bot (используем Ktor Client, который уже есть)
+    
     testImplementation(kotlin("test"))
 }
 

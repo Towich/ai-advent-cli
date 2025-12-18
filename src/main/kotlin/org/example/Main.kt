@@ -21,9 +21,13 @@ import org.example.domain.usecase.SendChatMessageWithToolsUseCase
 import org.example.infrastructure.config.AppConfig
 import org.example.infrastructure.notification.TelegramNotifier
 import org.example.infrastructure.scheduler.ReminderSummaryScheduler
+import org.example.infrastructure.telegram.TelegramBotService
 import org.example.presentation.controller.ChatController
 import org.example.presentation.controller.McpController
 import org.slf4j.LoggerFactory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
 private val logger = LoggerFactory.getLogger("org.example.MainKt")
 
@@ -112,6 +116,36 @@ fun Application.module() {
     )
     val reminderJob: Job = reminderSummaryScheduler.start(this)
     
+    // Инициализация Telegram-бота
+    val telegramBotService = run {
+        if (AppConfig.telegramBotEnabled) {
+            val token = AppConfig.telegramBotToken
+            if (token.isNullOrBlank()) {
+                logger.warn("TELEGRAM_BOT_ENABLED=true, но TELEGRAM_BOT_TOKEN не установлен. Telegram-бот не будет запущен.")
+                null
+            } else {
+                logger.info("Инициализация Telegram-бота...")
+                TelegramBotService(
+                    botToken = token,
+                    chatWithToolsService = chatWithToolsService,
+                    defaultVendor = AppConfig.telegramBotDefaultVendor,
+                    defaultModel = AppConfig.telegramBotDefaultModel,
+                    defaultMcpServerUrl = AppConfig.mcpServerUrl,
+                    defaultMaxToolIterations = AppConfig.telegramBotDefaultMaxToolIterations
+                )
+            }
+        } else {
+            null
+        }
+    }
+    
+    // Запуск Telegram-бота в отдельной корутине
+    val telegramBotScope = CoroutineScope(SupervisorJob())
+    telegramBotService?.let { bot ->
+        logger.info("Запуск Telegram-бота в режиме long polling")
+        bot.startLongPolling(telegramBotScope)
+    }
+    
     val chatController = ChatController(
         sendChatMessageUseCase = sendChatMessageUseCase,
         sendMultiChatMessageUseCase = sendMultiChatMessageUseCase,
@@ -131,6 +165,8 @@ fun Application.module() {
         logger.info("Остановка сервера, очистка ресурсов")
         reminderJob.cancel()
         telegramNotifier?.close()
+        telegramBotService?.close()
+        telegramBotScope.cancel()
         perplexityRepository.close()
         gigaChatRepository.close()
         huggingFaceRepository.close()

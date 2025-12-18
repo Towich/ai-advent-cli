@@ -5,6 +5,7 @@ package org.example.infrastructure.config
  */
 object AppConfig {
     private const val DEFAULT_API_URL = "https://api.perplexity.ai/chat/completions"
+    private const val DEFAULT_VENDOR = "perplexity"
     private const val DEFAULT_MODEL = "sonar"
     private const val DEFAULT_GIGACHAT_API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
     private const val DEFAULT_HUGGINGFACE_API_URL = "https://router.huggingface.co/v1/chat/completions"
@@ -69,7 +70,7 @@ object AppConfig {
         get() = System.getenv("REMINDER_SUMMARY_INTERVAL_MS")?.toLongOrNull() ?: DEFAULT_REMINDER_SUMMARY_INTERVAL_MS
 
     val reminderSummaryVendor: String?
-        get() = System.getenv("REMINDER_SUMMARY_VENDOR") ?: "perplexity"
+        get() = System.getenv("REMINDER_SUMMARY_VENDOR") ?: DEFAULT_VENDOR
 
     val reminderSummaryModel: String?
         get() = System.getenv("REMINDER_SUMMARY_MODEL") ?: DEFAULT_MODEL
@@ -85,6 +86,21 @@ object AppConfig {
 
     val telegramChatId: String?
         get() = System.getenv("TELEGRAM_CHAT_ID")
+
+    /**
+     * Telegram Bot (для обработки команд)
+     */
+    val telegramBotEnabled: Boolean
+        get() = (System.getenv("TELEGRAM_BOT_ENABLED") ?: "false").toBoolean()
+
+    val telegramBotDefaultVendor: String
+        get() = System.getenv("TELEGRAM_BOT_DEFAULT_VENDOR") ?: DEFAULT_VENDOR
+
+    val telegramBotDefaultModel: String?
+        get() = System.getenv("TELEGRAM_BOT_DEFAULT_MODEL") ?: DEFAULT_MODEL
+
+    val telegramBotDefaultMaxToolIterations: Int
+        get() = System.getenv("TELEGRAM_BOT_DEFAULT_MAX_TOOL_ITERATIONS")?.toIntOrNull() ?: 10
 }
 
 

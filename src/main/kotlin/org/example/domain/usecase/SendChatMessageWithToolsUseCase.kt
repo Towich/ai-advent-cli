@@ -60,7 +60,8 @@ class SendChatMessageWithToolsUseCase(
         outputSchema: String?,
         temperature: Double?,
         mcpServerUrl: String,
-        maxToolIterations: Int
+        maxToolIterations: Int,
+        onToolCall: (suspend (ToolCallInfo) -> Unit)? = null
     ): Result<ChatWithToolsResult> {
         val startTime = System.currentTimeMillis()
         var mcpRepository: McpRepositoryImpl? = null
@@ -151,14 +152,22 @@ class SendChatMessageWithToolsUseCase(
                             logger.info("Тул ${toolCall.toolName} выполнен успешно")
                             
                             // Сохраняем информацию о вызове тула
-                            toolCalls.add(
-                                ToolCallInfo(
-                                    toolName = toolCall.toolName,
-                                    arguments = toolCall.arguments,
-                                    result = result,
-                                    success = true
-                                )
+                            val toolCallInfo = ToolCallInfo(
+                                toolName = toolCall.toolName,
+                                arguments = toolCall.arguments,
+                                result = result,
+                                success = true
                             )
+                            toolCalls.add(toolCallInfo)
+                            
+                            // Вызываем колбэк для уведомления о туле
+                            try {
+                                logger.info("Вызываю колбэк onToolCall для тула: ${toolCall.toolName}")
+                                onToolCall?.invoke(toolCallInfo)
+                                logger.info("Колбэк onToolCall успешно выполнен для тула: ${toolCall.toolName}")
+                            } catch (e: Exception) {
+                                logger.error("Ошибка при вызове колбэка onToolCall: ${e.message}", e)
+                            }
                             
                             // Добавляем ответ модели и результат тула в диалог
                             messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))
@@ -173,14 +182,22 @@ class SendChatMessageWithToolsUseCase(
                             logger.error("Ошибка при выполнении тула ${toolCall.toolName}: ${error.message}")
                             
                             // Сохраняем информацию об ошибке
-                            toolCalls.add(
-                                ToolCallInfo(
-                                    toolName = toolCall.toolName,
-                                    arguments = toolCall.arguments,
-                                    result = "Ошибка: ${error.message}",
-                                    success = false
-                                )
+                            val errorToolCallInfo = ToolCallInfo(
+                                toolName = toolCall.toolName,
+                                arguments = toolCall.arguments,
+                                result = "Ошибка: ${error.message}",
+                                success = false
                             )
+                            toolCalls.add(errorToolCallInfo)
+                            
+                            // Вызываем колбэк для уведомления об ошибке тула
+                            try {
+                                logger.info("Вызываю колбэк onToolCall для ошибки тула: ${toolCall.toolName}")
+                                onToolCall?.invoke(errorToolCallInfo)
+                                logger.info("Колбэк onToolCall успешно выполнен для ошибки тула: ${toolCall.toolName}")
+                            } catch (e: Exception) {
+                                logger.error("Ошибка при вызове колбэка onToolCall для ошибки: ${e.message}", e)
+                            }
                             
                             // Добавляем ответ модели и ошибку в диалог
                             messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))

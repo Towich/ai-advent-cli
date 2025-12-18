@@ -1,6 +1,7 @@
 package org.example.application
 
 import org.example.domain.usecase.SendChatMessageWithToolsUseCase
+import org.example.presentation.dto.ToolCallInfo
 
 /**
  * Переиспользуемый сервис для выполнения "chat with tools" как из HTTP, так и из фоновых задач.
@@ -20,7 +21,8 @@ class ChatWithToolsService(
         val outputSchema: String? = null,
         val temperature: Double? = null,
         val mcpServerUrl: String,
-        val maxToolIterations: Int? = 10
+        val maxToolIterations: Int? = 10,
+        val onToolCall: (suspend (ToolCallInfo) -> Unit)? = null
     )
 
     suspend fun execute(command: Command): Result<SendChatMessageWithToolsUseCase.ChatWithToolsResult> {
@@ -38,7 +40,8 @@ class ChatWithToolsService(
             outputSchema = command.outputSchema,
             temperature = command.temperature,
             mcpServerUrl = command.mcpServerUrl,
-            maxToolIterations = maxToolIterations
+            maxToolIterations = maxToolIterations,
+            onToolCall = command.onToolCall
         )
     }
 
