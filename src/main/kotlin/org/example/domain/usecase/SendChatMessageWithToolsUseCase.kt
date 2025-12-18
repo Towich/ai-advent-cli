@@ -136,6 +136,7 @@ class SendChatMessageWithToolsUseCase(
                 totalUsage = combineUsage(totalUsage, usage)
                 
                 // Пытаемся распарсить ответ как JSON с вызовом тула
+                logger.debug("Парсинг ответа модели (итерация $currentIteration): ${content.take(200)}...")
                 val toolCall = parseToolCall(content)
                 
                 if (toolCall != null) {
@@ -164,7 +165,7 @@ class SendChatMessageWithToolsUseCase(
                             messages.add(
                                 Message(
                                     role = Message.ROLE_USER,
-                                    content = "Результат выполнения тула ${toolCall.toolName}: $result"
+                                    content = "Результат выполнения тула ${toolCall.toolName}: $result\n\nВы можете продолжить использовать другие тулзы, если это необходимо для выполнения задачи. Если у вас достаточно информации для финального ответа, используйте формат {\"final\": \"<ваш ответ>\"}."
                                 )
                             )
                         },
@@ -186,7 +187,7 @@ class SendChatMessageWithToolsUseCase(
                             messages.add(
                                 Message(
                                     role = Message.ROLE_USER,
-                                    content = "Ошибка при выполнении тула ${toolCall.toolName}: ${error.message}"
+                                    content = "Ошибка при выполнении тула ${toolCall.toolName}: ${error.message}\n\nВы можете попробовать использовать другой тул или предоставить финальный ответ, используя формат {\"final\": \"<ваш ответ>\"}."
                                 )
                             )
                         }
@@ -194,6 +195,8 @@ class SendChatMessageWithToolsUseCase(
                 } else {
                     // Это финальный ответ, не требующий вызова тула
                     // Извлекаем финальный ответ из JSON, если он там есть
+                    logger.info("Модель не вызвала тул в итерации $currentIteration. Завершаем диалог.")
+                    logger.debug("Ответ модели (без вызова тула): ${content.take(200)}...")
                     val finalContent = extractFinalAnswer(content)
                     logger.info("Получен финальный ответ от модели (без вызова тула)")
                     val executionTimeMs = System.currentTimeMillis() - startTime
@@ -251,7 +254,8 @@ class SendChatMessageWithToolsUseCase(
         
         // Описание тулзов
         val toolsDescription = buildString {
-            append("You can call tools by emitting JSON ONLY.\n\n")
+            append("You are an AI agent that can use tools through MCP (Model Context Protocol).\n")
+            append("You can chain multiple tool calls in a conversation to accomplish complex tasks.\n\n")
             append("Available tools:\n")
             tools.forEachIndexed { index, tool ->
                 append("${index + 1}) ${tool.name}")
@@ -267,13 +271,19 @@ class SendChatMessageWithToolsUseCase(
                 }
             }
             append("\n")
-            append("If you need a tool, respond with JSON ONLY in this format:\n")
+            append("IMPORTANT RULES:\n")
+            append("1. You can call tools multiple times in a chain. After a tool is executed, you will receive its result and can call another tool if needed.\n")
+            append("2. You can use different tools in sequence to accomplish your goal.\n")
+            append("3. Continue using tools until you have all the information needed to provide a final answer.\n")
+            append("4. Only stop using tools when you have enough information to give a complete answer to the user.\n\n")
+            append("RESPONSE FORMAT:\n")
+            append("If you need to call a tool, respond with JSON ONLY in this format:\n")
             append("{\"tool\": \"<tool_name>\", \"args\": { ... }}\n")
             append("\n")
-            append("If no tool needed, respond with JSON ONLY in this format:\n")
+            append("If you have enough information and want to provide the final answer (no more tools needed), respond with JSON ONLY in this format:\n")
             append("{\"final\": \"<your final answer>\"}\n")
             append("\n")
-            append("IMPORTANT: Your response must be valid JSON. Do not include any text before or after the JSON.")
+            append("CRITICAL: Your response must be valid JSON. Do not include any text before or after the JSON.")
         }
         parts.add(toolsDescription)
         
@@ -355,11 +365,31 @@ class SendChatMessageWithToolsUseCase(
     private fun parseToolCall(content: String): ToolCall? {
         return try {
             // Очищаем контент от возможных markdown блоков
-            val cleanedContent = content.trim()
-                .removePrefix("```json")
-                .removePrefix("```")
-                .removeSuffix("```")
-                .trim()
+            var cleanedContent = content.trim()
+            
+            // Удаляем markdown блоки кода
+            if (cleanedContent.startsWith("```")) {
+                val lines = cleanedContent.lines()
+                val firstLine = lines.firstOrNull() ?: ""
+                if (firstLine.contains("json", ignoreCase = true) || firstLine == "```") {
+                    // Удаляем первую строку (```json или ```)
+                    cleanedContent = lines.drop(1).joinToString("\n")
+                }
+                // Удаляем последнюю строку, если это ```
+                if (cleanedContent.endsWith("```")) {
+                    cleanedContent = cleanedContent.removeSuffix("```").trim()
+                }
+            }
+            
+            cleanedContent = cleanedContent.trim()
+            
+            // Пытаемся найти JSON в тексте (может быть текст до/после JSON)
+            val jsonStart = cleanedContent.indexOf('{')
+            val jsonEnd = cleanedContent.lastIndexOf('}')
+            
+            if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                cleanedContent = cleanedContent.substring(jsonStart, jsonEnd + 1)
+            }
             
             val json = jsonSerializer.parseToJsonElement(cleanedContent).jsonObject
             
@@ -378,14 +408,23 @@ class SendChatMessageWithToolsUseCase(
                     }
                 } ?: emptyMap()
                 
+                logger.debug("Успешно распарсен вызов тула: $toolName с ${args.size} аргументами")
                 return ToolCall(toolName, args)
+            }
+            
+            // Если нет поля "tool", проверяем, есть ли поле "final" - это явный финальный ответ
+            val hasFinal = json["final"] != null
+            if (hasFinal) {
+                logger.debug("Обнаружено явное поле 'final' в ответе - это финальный ответ")
+            } else {
+                logger.debug("Ответ является валидным JSON, но не содержит ни 'tool', ни 'final'")
             }
             
             // Если нет поля "tool", это не вызов тула
             null
         } catch (e: Exception) {
             // Если не удалось распарсить как JSON, считаем это финальным ответом
-            logger.debug("Ответ не является JSON с вызовом тула: ${e.message}")
+            logger.debug("Ответ не является валидным JSON с вызовом тула: ${e.message}")
             null
         }
     }
