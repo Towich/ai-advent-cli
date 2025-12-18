@@ -1,6 +1,7 @@
 package org.example.domain.usecase
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -315,8 +316,12 @@ class SendChatMessageWithToolsUseCase(
                 }
                 
                 // Проверяем required поля
-                val required = schema["required"]?.jsonArray?.mapNotNull { 
-                    it.jsonPrimitive.content 
+                val required = schema["required"]?.jsonArray?.mapNotNull { element ->
+                    try {
+                        element.jsonPrimitive.content
+                    } catch (e: Exception) {
+                        null
+                    }
                 } ?: emptyList()
                 
                 if (argsList.isEmpty()) {
@@ -363,9 +368,12 @@ class SendChatMessageWithToolsUseCase(
             if (toolName != null) {
                 val args = json["args"]?.jsonObject?.let { argsObj ->
                     argsObj.entries.associate { (key, value) ->
-                        key to when {
-                            value.jsonPrimitive.isString -> value.jsonPrimitive.content
-                            else -> value.toString()
+                        key to try {
+                            // Пытаемся получить примитивное значение
+                            value.jsonPrimitive.content
+                        } catch (e: Exception) {
+                            // Если не примитив (массив, объект), сериализуем в JSON строку
+                            jsonSerializer.encodeToString(JsonElement.serializer(), value)
                         }
                     }
                 } ?: emptyMap()
