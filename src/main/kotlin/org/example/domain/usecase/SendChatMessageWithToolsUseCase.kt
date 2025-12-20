@@ -180,132 +180,127 @@ class SendChatMessageWithToolsUseCase(
                 // Обновляем общее использование токенов
                 totalUsage = combineUsage(totalUsage, usage)
                 
-                // Пытаемся распарсить ответ как JSON с вызовом тула
+                // Пытаемся распарсить ответ как JSON с вызовом тула(ов)
                 logger.debug("Парсинг ответа модели (итерация $currentIteration): ${content.take(200)}...")
-                val toolCall = parseToolCall(content)
+                val toolCallsFromResponse = parseToolCalls(content)
                 
-                if (toolCall != null) {
-                    // Это вызов тула
-                    logger.info("Обнаружен вызов тула: ${toolCall.toolName} с аргументами: ${toolCall.arguments}")
+                if (toolCallsFromResponse.isNotEmpty()) {
+                    // Обнаружены вызовы тулзов
+                    logger.info("Обнаружено ${toolCallsFromResponse.size} вызов(ов) тула(ов): ${toolCallsFromResponse.joinToString(", ") { it.toolName }}")
                     
-                    // Находим инструмент и определяем, к какому серверу он принадлежит
-                    val tool = tools.find { it.name == toolCall.toolName }
-                    val serverUrl = tool?.serverUrl
+                    // Добавляем ответ модели один раз перед всеми тулзами
+                    messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))
                     
-                    if (serverUrl == null) {
-                        logger.error("Не удалось найти сервер для инструмента: ${toolCall.toolName}")
-                        val errorToolCallInfo = ToolCallInfo(
-                            toolName = toolCall.toolName,
-                            arguments = toolCall.arguments,
-                            result = "Ошибка: Инструмент не найден ни на одном из подключенных MCP-серверов",
-                            success = false,
-                            serverUrl = null
-                        )
-                        toolCalls.add(errorToolCallInfo)
-                        onToolCall?.invoke(errorToolCallInfo)
-                        messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))
-                        messages.add(
-                            Message(
-                                role = Message.ROLE_USER,
-                                content = "Ошибка: Инструмент ${toolCall.toolName} не найден ни на одном из подключенных MCP-серверов. Используйте другой инструмент или предоставьте финальный ответ."
-                            )
-                        )
-                        continue
-                    }
+                    // Собираем результаты всех тулзов
+                    val toolResults = mutableListOf<String>()
                     
-                    val repository = mcpRepositories[serverUrl]
-                    if (repository == null) {
-                        logger.error("Репозиторий для сервера $serverUrl не найден")
-                        val errorToolCallInfo = ToolCallInfo(
-                            toolName = toolCall.toolName,
-                            arguments = toolCall.arguments,
-                            result = "Ошибка: Репозиторий для сервера $serverUrl не найден",
-                            success = false,
-                            serverUrl = serverUrl
-                        )
-                        toolCalls.add(errorToolCallInfo)
-                        onToolCall?.invoke(errorToolCallInfo)
-                        messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))
-                        messages.add(
-                            Message(
-                                role = Message.ROLE_USER,
-                                content = "Ошибка: Не удалось найти репозиторий для сервера $serverUrl. Используйте другой инструмент или предоставьте финальный ответ."
-                            )
-                        )
-                        continue
-                    }
+                    // Выполняем все тулзы последовательно
+                    for (toolCall in toolCallsFromResponse) {
+                        logger.info("Обработка тула: ${toolCall.toolName} с аргументами: ${toolCall.arguments}")
                     
-                    logger.info("Выполняю тул ${toolCall.toolName} на сервере: $serverUrl")
-                    
-                    // Выполняем тул
-                    val toolResult = repository.callTool(toolCall.toolName, toolCall.arguments)
-                    
-                    toolResult.fold(
-                        onSuccess = { result ->
-                            logger.info("Тул ${toolCall.toolName} выполнен успешно")
-                            
-                            // Сохраняем информацию о вызове тула
-                            val toolCallInfo = ToolCallInfo(
-                                toolName = toolCall.toolName,
-                                arguments = toolCall.arguments,
-                                result = result,
-                                success = true,
-                                serverUrl = serverUrl
-                            )
-                            toolCalls.add(toolCallInfo)
-                            
-                            // Вызываем колбэк для уведомления о туле
-                            try {
-                                logger.info("Вызываю колбэк onToolCall для тула: ${toolCall.toolName}")
-                                onToolCall?.invoke(toolCallInfo)
-                                logger.info("Колбэк onToolCall успешно выполнен для тула: ${toolCall.toolName}")
-                            } catch (e: Exception) {
-                                logger.error("Ошибка при вызове колбэка onToolCall: ${e.message}", e)
-                            }
-                            
-                            // Добавляем ответ модели и результат тула в диалог
-                            messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))
-                            messages.add(
-                                Message(
-                                    role = Message.ROLE_USER,
-                                    content = "Результат выполнения тула ${toolCall.toolName}: $result\n\n" +
-                                            "Вы можете продолжить без разрешения использовать другие тулзы, если это необходимо для выполнения задачи." +
-                                            "Если у вас достаточно информации для финального ответа, используйте формат {\"final\": \"<ваш ответ>\"}." +
-                                            "Если появилась какая-то ошибка, то попробуй еще раз вызвать этот инструмент в правильном формате"
-                                )
-                            )
-                        },
-                        onFailure = { error ->
-                            logger.error("Ошибка при выполнении тула ${toolCall.toolName}: ${error.message}")
-                            
-                            // Сохраняем информацию об ошибке
+                        // Находим инструмент и определяем, к какому серверу он принадлежит
+                        val tool = tools.find { it.name == toolCall.toolName }
+                        val serverUrl = tool?.serverUrl
+                        
+                        if (serverUrl == null) {
+                            logger.error("Не удалось найти сервер для инструмента: ${toolCall.toolName}")
                             val errorToolCallInfo = ToolCallInfo(
                                 toolName = toolCall.toolName,
                                 arguments = toolCall.arguments,
-                                result = "Ошибка: ${error.message}",
+                                result = "Ошибка: Инструмент не найден ни на одном из подключенных MCP-серверов",
+                                success = false,
+                                serverUrl = null
+                            )
+                            toolCalls.add(errorToolCallInfo)
+                            onToolCall?.invoke(errorToolCallInfo)
+                            toolResults.add("Ошибка: Инструмент ${toolCall.toolName} не найден ни на одном из подключенных MCP-серверов.")
+                            continue
+                        }
+                        
+                        val repository = mcpRepositories[serverUrl]
+                        if (repository == null) {
+                            logger.error("Репозиторий для сервера $serverUrl не найден")
+                            val errorToolCallInfo = ToolCallInfo(
+                                toolName = toolCall.toolName,
+                                arguments = toolCall.arguments,
+                                result = "Ошибка: Репозиторий для сервера $serverUrl не найден",
                                 success = false,
                                 serverUrl = serverUrl
                             )
                             toolCalls.add(errorToolCallInfo)
-                            
-                            // Вызываем колбэк для уведомления об ошибке тула
-                            try {
-                                logger.info("Вызываю колбэк onToolCall для ошибки тула: ${toolCall.toolName}")
-                                onToolCall?.invoke(errorToolCallInfo)
-                                logger.info("Колбэк onToolCall успешно выполнен для ошибки тула: ${toolCall.toolName}")
-                            } catch (e: Exception) {
-                                logger.error("Ошибка при вызове колбэка onToolCall для ошибки: ${e.message}", e)
-                            }
-                            
-                            // Добавляем ответ модели и ошибку в диалог
-                            messages.add(Message(role = Message.ROLE_ASSISTANT, content = content))
-                            messages.add(
-                                Message(
-                                    role = Message.ROLE_USER,
-                                    content = "Ошибка при выполнении тула ${toolCall.toolName}: ${error.message}\n\nВы можете попробовать использовать другой тул или предоставить финальный ответ, используя формат {\"final\": \"<ваш ответ>\"}."
-                                )
-                            )
+                            onToolCall?.invoke(errorToolCallInfo)
+                            toolResults.add("Ошибка: Не удалось найти репозиторий для сервера $serverUrl.")
+                            continue
                         }
+                        
+                        logger.info("Выполняю тул ${toolCall.toolName} на сервере: $serverUrl")
+                        
+                        // Выполняем тул
+                        val toolResult = repository.callTool(toolCall.toolName, toolCall.arguments)
+                        
+                        toolResult.fold(
+                            onSuccess = { result ->
+                                logger.info("Тул ${toolCall.toolName} выполнен успешно")
+                                
+                                // Сохраняем информацию о вызове тула
+                                val toolCallInfo = ToolCallInfo(
+                                    toolName = toolCall.toolName,
+                                    arguments = toolCall.arguments,
+                                    result = result,
+                                    success = true,
+                                    serverUrl = serverUrl
+                                )
+                                toolCalls.add(toolCallInfo)
+                                
+                                // Вызываем колбэк для уведомления о туле
+                                try {
+                                    logger.info("Вызываю колбэк onToolCall для тула: ${toolCall.toolName}")
+                                    onToolCall?.invoke(toolCallInfo)
+                                    logger.info("Колбэк onToolCall успешно выполнен для тула: ${toolCall.toolName}")
+                                } catch (e: Exception) {
+                                    logger.error("Ошибка при вызове колбэка onToolCall: ${e.message}", e)
+                                }
+                                
+                                // Сохраняем результат для последующего добавления в диалог
+                                toolResults.add("Результат выполнения тула ${toolCall.toolName}: $result")
+                            },
+                            onFailure = { error ->
+                                logger.error("Ошибка при выполнении тула ${toolCall.toolName}: ${error.message}")
+                                
+                                // Сохраняем информацию об ошибке
+                                val errorToolCallInfo = ToolCallInfo(
+                                    toolName = toolCall.toolName,
+                                    arguments = toolCall.arguments,
+                                    result = "Ошибка: ${error.message}",
+                                    success = false,
+                                    serverUrl = serverUrl
+                                )
+                                toolCalls.add(errorToolCallInfo)
+                                
+                                // Вызываем колбэк для уведомления об ошибке тула
+                                try {
+                                    logger.info("Вызываю колбэк onToolCall для ошибки тула: ${toolCall.toolName}")
+                                    onToolCall?.invoke(errorToolCallInfo)
+                                    logger.info("Колбэк onToolCall успешно выполнен для ошибки тула: ${toolCall.toolName}")
+                                } catch (e: Exception) {
+                                    logger.error("Ошибка при вызове колбэка onToolCall для ошибки: ${e.message}", e)
+                                }
+                                
+                                // Сохраняем ошибку для последующего добавления в диалог
+                                toolResults.add("Ошибка при выполнении тула ${toolCall.toolName}: ${error.message}")
+                            }
+                        )
+                    } // Конец цикла for по toolCallsFromResponse
+                    
+                    // Добавляем все результаты тулзов в диалог одним сообщением
+                    val combinedResults = toolResults.joinToString("\n\n")
+                    messages.add(
+                        Message(
+                            role = Message.ROLE_USER,
+                            content = "$combinedResults\n\nВы можете продолжить без разрешения использовать другие тулзы, если это необходимо для выполнения задачи. " +
+                                    "Если у вас достаточно информации для финального ответа, используйте формат {\"final\": \"<ваш ответ>\"}. " +
+                                    "Если появилась какая-то ошибка, то попробуй еще раз вызвать этот инструмент в правильном формате."
+                        )
                     )
                 } else {
                     // Это финальный ответ, не требующий вызова тула
@@ -485,8 +480,14 @@ class SendChatMessageWithToolsUseCase(
     /**
      * Парсит ответ модели и извлекает информацию о вызове тула
      */
-    private fun parseToolCall(content: String): ToolCall? {
-        return try {
+    /**
+     * Парсит один или несколько вызовов тулзов из контента модели
+     * Поддерживает формат с несколькими JSON объектами, разделенными новой строкой
+     */
+    private fun parseToolCalls(content: String): List<ToolCall> {
+        val toolCalls = mutableListOf<ToolCall>()
+        
+        try {
             // Очищаем контент от возможных markdown блоков
             var cleanedContent = content.trim()
             
@@ -506,50 +507,123 @@ class SendChatMessageWithToolsUseCase(
             
             cleanedContent = cleanedContent.trim()
             
-            // Пытаемся найти JSON в тексте (может быть текст до/после JSON)
-            val jsonStart = cleanedContent.indexOf('{')
-            val jsonEnd = cleanedContent.lastIndexOf('}')
+            // Разбиваем на строки и пытаемся распарсить каждую как отдельный JSON объект
+            val lines = cleanedContent.lines()
+            var currentJson = StringBuilder()
+            var braceCount = 0
             
-            if (jsonStart >= 0 && jsonEnd > jsonStart) {
-                cleanedContent = cleanedContent.substring(jsonStart, jsonEnd + 1)
+            for (line in lines) {
+                val trimmedLine = line.trim()
+                if (trimmedLine.isEmpty()) continue
+                
+                currentJson.append(trimmedLine)
+                
+                // Подсчитываем открывающие и закрывающие скобки
+                braceCount += trimmedLine.count { it == '{' } - trimmedLine.count { it == '}' }
+                
+                // Если скобки сбалансированы, пытаемся распарсить JSON
+                if (braceCount == 0 && currentJson.isNotEmpty()) {
+                    try {
+                        val jsonString = currentJson.toString().trim()
+                        if (jsonString.startsWith("{") && jsonString.endsWith("}")) {
+                            val json = jsonSerializer.parseToJsonElement(jsonString).jsonObject
+                            
+                            // Проверяем, есть ли поле "tool" - это вызов тула
+                            val toolName = json["tool"]?.jsonPrimitive?.content
+                            if (toolName != null) {
+                                val args = json["args"]?.jsonObject?.let { argsObj ->
+                                    argsObj.entries.associate { (key, value) ->
+                                        key to try {
+                                            // Пытаемся получить примитивное значение
+                                            value.jsonPrimitive.content
+                                        } catch (e: Exception) {
+                                            // Если не примитив (массив, объект), сериализуем в JSON строку
+                                            jsonSerializer.encodeToString(JsonElement.serializer(), value)
+                                        }
+                                    }
+                                } ?: emptyMap()
+                                
+                                logger.debug("Успешно распарсен вызов тула: $toolName с ${args.size} аргументами")
+                                toolCalls.add(ToolCall(toolName, args))
+                            } else {
+                                // Проверяем, есть ли поле "final" - это явный финальный ответ
+                                val hasFinal = json["final"] != null
+                                if (hasFinal) {
+                                    logger.debug("Обнаружено явное поле 'final' в ответе - это финальный ответ")
+                                    // Если есть "final", прекращаем парсинг тулзов
+                                    break
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        logger.debug("Не удалось распарсить строку как JSON: ${e.message}")
+                    }
+                    
+                    // Сбрасываем текущий JSON
+                    currentJson.clear()
+                }
             }
             
-            val json = jsonSerializer.parseToJsonElement(cleanedContent).jsonObject
-            
-            // Проверяем, есть ли поле "tool" - это вызов тула
-            val toolName = json["tool"]?.jsonPrimitive?.content
-            if (toolName != null) {
-                val args = json["args"]?.jsonObject?.let { argsObj ->
-                    argsObj.entries.associate { (key, value) ->
-                        key to try {
-                            // Пытаемся получить примитивное значение
-                            value.jsonPrimitive.content
-                        } catch (e: Exception) {
-                            // Если не примитив (массив, объект), сериализуем в JSON строку
-                            jsonSerializer.encodeToString(JsonElement.serializer(), value)
+            // Если не удалось распарсить по строкам, пытаемся найти все JSON объекты в тексте
+            if (toolCalls.isEmpty()) {
+                var searchStart = 0
+                while (true) {
+                    val jsonStart = cleanedContent.indexOf('{', searchStart)
+                    if (jsonStart < 0) break
+                    
+                    var braceCount = 0
+                    var jsonEnd = jsonStart
+                    
+                    for (i in jsonStart until cleanedContent.length) {
+                        when (cleanedContent[i]) {
+                            '{' -> braceCount++
+                            '}' -> {
+                                braceCount--
+                                if (braceCount == 0) {
+                                    jsonEnd = i
+                                    break
+                                }
+                            }
                         }
                     }
-                } ?: emptyMap()
-                
-                logger.debug("Успешно распарсен вызов тула: $toolName с ${args.size} аргументами")
-                return ToolCall(toolName, args)
+                    
+                    if (jsonEnd > jsonStart) {
+                        try {
+                            val jsonString = cleanedContent.substring(jsonStart, jsonEnd + 1)
+                            val json = jsonSerializer.parseToJsonElement(jsonString).jsonObject
+                            
+                            val toolName = json["tool"]?.jsonPrimitive?.content
+                            if (toolName != null) {
+                                val args = json["args"]?.jsonObject?.let { argsObj ->
+                                    argsObj.entries.associate { (key, value) ->
+                                        key to try {
+                                            value.jsonPrimitive.content
+                                        } catch (e: Exception) {
+                                            jsonSerializer.encodeToString(JsonElement.serializer(), value)
+                                        }
+                                    }
+                                } ?: emptyMap()
+                                
+                                logger.debug("Успешно распарсен вызов тула (метод 2): $toolName с ${args.size} аргументами")
+                                toolCalls.add(ToolCall(toolName, args))
+                            } else if (json["final"] != null) {
+                                logger.debug("Обнаружено явное поле 'final' в ответе - это финальный ответ")
+                                break
+                            }
+                        } catch (e: Exception) {
+                            logger.debug("Не удалось распарсить JSON объект: ${e.message}")
+                        }
+                    }
+                    
+                    searchStart = jsonEnd + 1
+                }
             }
             
-            // Если нет поля "tool", проверяем, есть ли поле "final" - это явный финальный ответ
-            val hasFinal = json["final"] != null
-            if (hasFinal) {
-                logger.debug("Обнаружено явное поле 'final' в ответе - это финальный ответ")
-            } else {
-                logger.debug("Ответ является валидным JSON, но не содержит ни 'tool', ни 'final'")
-            }
-            
-            // Если нет поля "tool", это не вызов тула
-            null
         } catch (e: Exception) {
-            // Если не удалось распарсить как JSON, считаем это финальным ответом
-            logger.debug("Ответ не является валидным JSON с вызовом тула: ${e.message}")
-            null
+            logger.debug("Ошибка при парсинге тулзов: ${e.message}")
         }
+        
+        return toolCalls
     }
     
     /**
