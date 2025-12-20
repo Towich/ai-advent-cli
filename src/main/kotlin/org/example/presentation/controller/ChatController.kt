@@ -18,6 +18,7 @@ import org.example.presentation.dto.ErrorResponse
 import org.example.presentation.dto.MultiChatApiRequest
 import org.example.presentation.dto.MultiChatApiResponse
 import org.example.presentation.dto.ModelResponse
+import org.example.infrastructure.notification.TelegramNotifier
 import org.example.presentation.middleware.ErrorHandler
 import org.example.presentation.validation.RequestValidator
 import org.slf4j.LoggerFactory
@@ -28,7 +29,8 @@ import org.slf4j.LoggerFactory
 class ChatController(
     private val sendChatMessageUseCase: SendChatMessageUseCase,
     private val sendMultiChatMessageUseCase: SendMultiChatMessageUseCase,
-    private val sendChatMessageWithToolsUseCase: SendChatMessageWithToolsUseCase
+    private val sendChatMessageWithToolsUseCase: SendChatMessageWithToolsUseCase,
+    private val telegramNotifier: TelegramNotifier? = null
 ) {
     private val logger = LoggerFactory.getLogger(ChatController::class.java)
     private val chatWithToolsService = ChatWithToolsService(sendChatMessageWithToolsUseCase)
@@ -291,6 +293,8 @@ class ChatController(
     }
 
     private suspend fun handleChatWithToolsRequest(call: ApplicationCall) {
+        logger.info("=== handleChatWithToolsRequest вызван ===")
+        logger.info("telegramNotifier: ${if (telegramNotifier != null) "настроен" else "не настроен"}")
         try {
             val request = call.receive<ChatWithToolsApiRequest>()
 
@@ -315,11 +319,47 @@ class ChatController(
 
             result.fold(
                 onSuccess = { chatResult ->
+                    logger.info("=== onSuccess вызван в handleChatWithToolsRequest ===")
                     // Логируем ответ юзеру
                     val usageInfo = chatResult.usage?.let {
                         "promptTokens=${it.promptTokens}, completionTokens=${it.completionTokens}, totalTokens=${it.totalTokens}, cost=$${it.cost?.let { String.format("%.6f", it) } ?: "N/A"}"
                     } ?: "N/A"
                     logger.info("Ответ юзеру [tools]: модель=${chatResult.model}, длина=${chatResult.content.length}, toolIterations=${chatResult.totalToolIterations}, toolCalls=${chatResult.toolCalls.size}, executionTime=${chatResult.executionTimeMs}ms, $usageInfo")
+
+                    // Отправляем уведомление в Telegram, если настроено
+                    if (telegramNotifier != null) {
+                        logger.info("Попытка отправить уведомление в Telegram...")
+                        try {
+                            val telegramMessage = buildString {
+                                append("✅ Ответ получен\n\n")
+                                append("📝 Модель: ${chatResult.model}\n")
+                                append("💬 Ответ:\n")
+                                append(chatResult.content.take(3000)) // Ограничиваем длину сообщения
+                                if (chatResult.content.length > 3000) {
+                                    append("\n\n... (сообщение обрезано)")
+                                }
+                                if (chatResult.usage != null) {
+                                    append("\n\n📊 Использовано токенов: ${chatResult.usage.totalTokens}")
+                                }
+                                if (chatResult.toolCalls.isNotEmpty()) {
+                                    append("\n🔧 Вызвано инструментов: ${chatResult.toolCalls.size}")
+                                }
+                            }
+                            logger.info("Отправка сообщения в Telegram (длина: ${telegramMessage.length} символов)")
+                            telegramNotifier.sendText(telegramMessage).fold(
+                                onSuccess = {
+                                    logger.info("✅ Уведомление в Telegram отправлено успешно")
+                                },
+                                onFailure = { error ->
+                                    logger.error("❌ Не удалось отправить уведомление в Telegram: ${error.message}", error)
+                                }
+                            )
+                        } catch (e: Exception) {
+                            logger.error("❌ Исключение при отправке уведомления в Telegram: ${e.message}", e)
+                        }
+                    } else {
+                        logger.debug("TelegramNotifier не настроен, уведомление не отправляется")
+                    }
 
                     val usage = chatResult.usage?.let {
                         org.example.presentation.dto.Usage(

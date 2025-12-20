@@ -5,8 +5,8 @@ package org.example.infrastructure.config
  */
 object AppConfig {
     private const val DEFAULT_API_URL = "https://api.perplexity.ai/chat/completions"
-    private const val DEFAULT_VENDOR = "perplexity"
-    private const val DEFAULT_MODEL = "sonar"
+    private const val DEFAULT_VENDOR = "gigachat"
+    private const val DEFAULT_MODEL = "GigaChat-2"
     private const val DEFAULT_GIGACHAT_API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
     private const val DEFAULT_HUGGINGFACE_API_URL = "https://router.huggingface.co/v1/chat/completions"
     private const val DEFAULT_SERVER_PORT = 8080

@@ -104,8 +104,10 @@ fun Application.module() {
         val token = AppConfig.telegramBotToken
         val chatId = AppConfig.telegramChatId
         if (!token.isNullOrBlank() && !chatId.isNullOrBlank()) {
+            logger.info("TelegramNotifier инициализирован: token=${token.take(10)}..., chatId=$chatId")
             TelegramNotifier(botToken = token, chatId = chatId)
         } else {
+            logger.warn("TelegramNotifier не инициализирован: token=${if (token.isNullOrBlank()) "не установлен" else "установлен"}, chatId=${if (chatId.isNullOrBlank()) "не установлен" else "установлен"}")
             null
         }
     }
@@ -149,7 +151,8 @@ fun Application.module() {
     val chatController = ChatController(
         sendChatMessageUseCase = sendChatMessageUseCase,
         sendMultiChatMessageUseCase = sendMultiChatMessageUseCase,
-        sendChatMessageWithToolsUseCase = sendChatMessageWithToolsUseCase
+        sendChatMessageWithToolsUseCase = sendChatMessageWithToolsUseCase,
+        telegramNotifier = telegramNotifier
     )
     
     val mcpController = McpController()

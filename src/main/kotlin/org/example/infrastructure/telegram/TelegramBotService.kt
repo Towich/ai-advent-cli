@@ -112,11 +112,13 @@ class TelegramBotService(
         parseMode: String? = null,
         disableWebPreview: Boolean = true
     ): Result<Unit> {
+        logger.info("TelegramBotService.sendMessage: chatId=$chatId, textLength=${text.length}, parseMode=$parseMode")
         return try {
             val url = URLBuilder("https://api.telegram.org")
                 .appendPathSegments("bot$botToken", "sendMessage")
                 .build()
 
+            logger.debug("Отправка запроса в Telegram API: $url")
             val resp: TelegramResponse = httpClient.post(url) {
                 accept(ContentType.Application.Json)
                 contentType(ContentType.Application.FormUrlEncoded)
@@ -132,17 +134,20 @@ class TelegramBotService(
                 )
             }.body<TelegramResponse>()
 
+            logger.info("Ответ от Telegram API: ok=${resp.ok}, errorCode=${resp.errorCode}, description=${resp.description}")
+
             if (!resp.ok) {
-                Result.failure(
-                    IllegalStateException(
-                        "Telegram sendMessage failed: ${resp.errorCode ?: "N/A"} ${resp.description ?: "unknown error"}"
-                    )
+                val error = IllegalStateException(
+                    "Telegram sendMessage failed: ${resp.errorCode ?: "N/A"} ${resp.description ?: "unknown error"}"
                 )
+                logger.error("Ошибка отправки в Telegram: ${error.message}")
+                Result.failure(error)
             } else {
+                logger.info("✅ Сообщение успешно отправлено в Telegram")
                 Result.success(Unit)
             }
         } catch (e: Exception) {
-            logger.error("Ошибка при отправке сообщения в Telegram: ${e.message}", e)
+            logger.error("Исключение при отправке сообщения в Telegram: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -217,17 +222,27 @@ class TelegramBotService(
 
                     result.fold(
                         onSuccess = { chatResult ->
-                            // Отправляем финальный результат
+                            logger.info("=== TelegramBotService: получен успешный результат ===")
+                            // Отправляем финальный результат без Markdown форматирования
                             val finalMessage = buildString {
-                                append("✅ *Результат:*\n\n")
+                                append("✅ Результат:\n\n")
                                 append(chatResult.content)
                                 if (chatResult.toolCalls.isNotEmpty()) {
                                     append("\n\n")
-                                    append("_Использовано инструментов: ${chatResult.toolCalls.size}_")
+                                    append("Использовано инструментов: ${chatResult.toolCalls.size}")
                                 }
                             }
 
-                            sendMessage(chatId, finalMessage, parseMode = "Markdown")
+                            logger.info("Отправка финального сообщения в Telegram (chatId: $chatId, длина: ${finalMessage.length})")
+                            val sendResult = sendMessage(chatId, finalMessage, parseMode = null)
+                            sendResult.fold(
+                                onSuccess = {
+                                    logger.info("✅ Сообщение успешно отправлено в Telegram")
+                                },
+                                onFailure = { error ->
+                                    logger.error("❌ Ошибка при отправке сообщения в Telegram: ${error.message}", error)
+                                }
+                            )
                             Result.success("Запрос обработан успешно")
                         },
                         onFailure = { error ->
