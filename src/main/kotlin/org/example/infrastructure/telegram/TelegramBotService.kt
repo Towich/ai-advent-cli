@@ -16,8 +16,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonArray
 import org.example.application.ChatWithToolsService
+import org.example.infrastructure.config.VendorDetector
 import org.example.presentation.dto.ToolCallInfo
 import org.slf4j.LoggerFactory
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Сервис для работы с Telegram-ботом
@@ -27,6 +29,7 @@ class TelegramBotService(
     private val chatWithToolsService: ChatWithToolsService,
     private val defaultVendor: String = "perplexity",
     private val defaultModel: String? = null,
+    private val defaultMaxTokens: Int? = null,
     private val defaultMcpServerUrls: List<String> = listOf("http://localhost:8002/mcp"),
     private val defaultMaxToolIterations: Int = 10
 ) {
@@ -38,6 +41,30 @@ class TelegramBotService(
     private val httpClient = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(jsonParser)
+        }
+    }
+    
+    /**
+     * Хранилище настроек пользователей (chatId -> настройки)
+     */
+    private data class UserSettings(
+        var vendor: String,
+        var model: String?,
+        var maxTokens: Int?
+    )
+    
+    private val userSettings = ConcurrentHashMap<Long, UserSettings>()
+    
+    /**
+     * Получает настройки пользователя или создает дефолтные
+     */
+    private fun getUserSettings(chatId: Long): UserSettings {
+        return userSettings.getOrPut(chatId) {
+            UserSettings(
+                vendor = defaultVendor,
+                model = defaultModel,
+                maxTokens = defaultMaxTokens
+            )
         }
     }
 
@@ -195,6 +222,9 @@ class TelegramBotService(
                         IllegalArgumentException("Команда /chat требует сообщение. Использование: /chat <ваше сообщение>")
                     )
 
+                    // Получаем настройки пользователя
+                    val settings = getUserSettings(chatId)
+
                     // Отправляем сообщение о начале обработки
                     sendMessage(chatId, "⏳ Обрабатываю запрос...")
 
@@ -212,8 +242,9 @@ class TelegramBotService(
                     val result = chatWithToolsService.execute(
                         ChatWithToolsService.Command(
                             message = message,
-                            vendor = defaultVendor,
-                            model = defaultModel,
+                            vendor = settings.vendor,
+                            model = settings.model,
+                            maxTokens = settings.maxTokens,
                             mcpServerUrls = defaultMcpServerUrls,
                             maxToolIterations = defaultMaxToolIterations,
                             onToolCall = onToolCall
@@ -253,16 +284,88 @@ class TelegramBotService(
                     )
                 }
 
+                command == "/vendor" -> {
+                    val vendorArg = args?.trim()?.lowercase()
+                    if (vendorArg.isNullOrBlank()) {
+                        // Показываем текущий вендор
+                        val settings = getUserSettings(chatId)
+                        sendMessage(chatId, "Текущий вендор: ${settings.vendor}")
+                        Result.success("Текущий вендор показан")
+                    } else {
+                        // Меняем вендор
+                        val vendor = VendorDetector.parseVendor(vendorArg)
+                        if (vendor == null) {
+                            val validVendors = "perplexity, gigachat, huggingface"
+                            sendMessage(chatId, "❌ Неизвестный вендор: $vendorArg\n\nДоступные вендоры: $validVendors")
+                            Result.failure(IllegalArgumentException("Неизвестный вендор: $vendorArg"))
+                        } else {
+                            val settings = getUserSettings(chatId)
+                            settings.vendor = vendorArg
+                            sendMessage(chatId, "✅ Вендор изменен на: ${settings.vendor}")
+                            Result.success("Вендор изменен")
+                        }
+                    }
+                }
+                
+                command == "/model" -> {
+                    val modelArg = args?.trim()
+                    if (modelArg.isNullOrBlank()) {
+                        // Показываем текущую модель
+                        val settings = getUserSettings(chatId)
+                        val modelText = settings.model ?: "не установлена (используется по умолчанию)"
+                        sendMessage(chatId, "Текущая модель: $modelText")
+                        Result.success("Текущая модель показана")
+                    } else {
+                        // Меняем модель
+                        val settings = getUserSettings(chatId)
+                        settings.model = modelArg
+                        sendMessage(chatId, "✅ Модель изменена на: ${settings.model}")
+                        Result.success("Модель изменена")
+                    }
+                }
+                
+                command == "/maxtokens" -> {
+                    val maxTokensArg = args?.trim()
+                    if (maxTokensArg.isNullOrBlank()) {
+                        // Показываем текущее ограничение токенов
+                        val settings = getUserSettings(chatId)
+                        val maxTokensText = settings.maxTokens?.toString() ?: "не установлено (используется по умолчанию)"
+                        sendMessage(chatId, "Текущее ограничение токенов: $maxTokensText")
+                        Result.success("Текущее ограничение токенов показано")
+                    } else {
+                        // Меняем ограничение токенов
+                        val maxTokensValue = maxTokensArg.toIntOrNull()
+                        if (maxTokensValue == null || maxTokensValue < 1) {
+                            sendMessage(chatId, "❌ Неверное значение. Ограничение токенов должно быть положительным числом.")
+                            Result.failure(IllegalArgumentException("Неверное значение maxTokens: $maxTokensArg"))
+                        } else {
+                            val settings = getUserSettings(chatId)
+                            settings.maxTokens = maxTokensValue
+                            sendMessage(chatId, "✅ Ограничение токенов изменено на: ${settings.maxTokens}")
+                            Result.success("Ограничение токенов изменено")
+                        }
+                    }
+                }
+
                 command == "/start" || command == "/help" -> {
                     val helpText = """
                         🤖 *AI Chat Bot с поддержкой инструментов*
                         
                         *Команды:*
                         /chat <сообщение> - Отправить запрос AI с использованием инструментов
+                        /vendor - Показать текущий вендор
+                        /vendor <название> - Изменить вендор (perplexity, gigachat, huggingface)
+                        /model - Показать текущую модель
+                        /model <название> - Изменить модель
+                        /maxtokens - Показать текущее ограничение токенов
+                        /maxtokens <число> - Изменить ограничение токенов
                         /help - Показать эту справку
                         
-                        *Пример:*
+                        *Примеры:*
                         /chat Какая погода в Москве?
+                        /vendor gigachat
+                        /model GigaChat-2
+                        /maxtokens 512
                         
                         Бот будет автоматически использовать доступные инструменты для выполнения вашего запроса.
                     """.trimIndent()

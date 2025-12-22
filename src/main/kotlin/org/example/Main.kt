@@ -132,6 +132,7 @@ fun Application.module() {
                     chatWithToolsService = chatWithToolsService,
                     defaultVendor = AppConfig.telegramBotDefaultVendor,
                     defaultModel = AppConfig.telegramBotDefaultModel,
+                    defaultMaxTokens = AppConfig.maxTokens,
                     defaultMcpServerUrls = AppConfig.mcpServerUrls,
                     defaultMaxToolIterations = AppConfig.telegramBotDefaultMaxToolIterations
                 )
