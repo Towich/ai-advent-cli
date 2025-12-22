@@ -15,7 +15,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.coroutines.launch
 import org.example.application.ChatWithToolsService
+import org.example.data.service.IndexService
+import org.example.domain.usecase.IndexDocumentsUseCase
 import org.example.infrastructure.config.VendorDetector
 import org.example.presentation.dto.ToolCallInfo
 import org.slf4j.LoggerFactory
@@ -31,7 +34,10 @@ class TelegramBotService(
     private val defaultModel: String? = null,
     private val defaultMaxTokens: Int? = null,
     private val defaultMcpServerUrls: List<String> = listOf("http://localhost:8002/mcp"),
-    private val defaultMaxToolIterations: Int = 10
+    private val defaultMaxToolIterations: Int = 10,
+    private val indexDocumentsUseCase: IndexDocumentsUseCase? = null,
+    private val indexService: IndexService? = null,
+    private val githubRepoUrl: String = "https://github.com/Towich/life"
 ) {
     private val logger = LoggerFactory.getLogger(TelegramBotService::class.java)
     private val jsonParser = Json {
@@ -347,6 +353,66 @@ class TelegramBotService(
                     }
                 }
 
+                command == "/index" -> {
+                    if (indexDocumentsUseCase == null || indexService == null) {
+                        sendMessage(chatId, "❌ Сервис индексации не настроен")
+                        return Result.failure(IllegalStateException("Сервис индексации не настроен"))
+                    }
+
+                    // Запускаем индексацию в отдельной корутине
+                    CoroutineScope(SupervisorJob()).launch {
+                        try {
+                            sendMessage(chatId, "⏳ Начинаю индексацию документов...\n\nЭто может занять некоторое время.")
+                            
+                            val repoPath = "repos/life"
+                            val result = indexDocumentsUseCase.execute(githubRepoUrl, repoPath)
+                            
+                            result.fold(
+                                onSuccess = { indexResult ->
+                                    val message = buildString {
+                                        append("✅ Индексация завершена успешно!\n\n")
+                                        append("📄 Документов: ${indexResult.totalDocuments}\n")
+                                        append("📝 Чанков: ${indexResult.totalChunks}\n")
+                                        append("🤖 Модель: ${indexResult.model}\n")
+                                        append("💾 Путь к индексу: ${indexResult.indexPath}")
+                                    }
+                                    sendMessage(chatId, message)
+                                },
+                                onFailure = { error ->
+                                    sendMessage(chatId, "❌ Ошибка при индексации: ${error.message}")
+                                }
+                            )
+                        } catch (e: Exception) {
+                            logger.error("Ошибка при индексации: ${e.message}", e)
+                            sendMessage(chatId, "❌ Произошла ошибка: ${e.message}")
+                        }
+                    }
+                    
+                    Result.success("Индексация запущена")
+                }
+
+                command == "/indexinfo" -> {
+                    if (indexService == null) {
+                        sendMessage(chatId, "❌ Сервис индексации не настроен")
+                        return Result.failure(IllegalStateException("Сервис индексации не настроен"))
+                    }
+
+                    val info = indexService.getIndexInfo()
+                    if (info == null) {
+                        sendMessage(chatId, "ℹ️ Индекс еще не создан. Используйте /index для создания индекса.")
+                    } else {
+                        val message = buildString {
+                            append("ℹ️ *Информация об индексе*\n\n")
+                            append("📄 Документов: ${info.totalDocuments}\n")
+                            append("📝 Чанков: ${info.totalChunks}\n")
+                            append("🤖 Модель: ${info.model}\n")
+                            append("📅 Создан: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date(info.createdAt))}")
+                        }
+                        sendMessage(chatId, message, parseMode = "Markdown")
+                    }
+                    Result.success("Информация об индексе отправлена")
+                }
+
                 command == "/start" || command == "/help" -> {
                     val helpText = """
                         🤖 *AI Chat Bot с поддержкой инструментов*
@@ -359,6 +425,8 @@ class TelegramBotService(
                         /model <название> - Изменить модель
                         /maxtokens - Показать текущее ограничение токенов
                         /maxtokens <число> - Изменить ограничение токенов
+                        /index - Индексировать документы из GitHub репозитория
+                        /indexinfo - Показать информацию об индексе
                         /help - Показать эту справку
                         
                         *Примеры:*
@@ -366,6 +434,7 @@ class TelegramBotService(
                         /vendor gigachat
                         /model GigaChat-2
                         /maxtokens 512
+                        /index
                         
                         Бот будет автоматически использовать доступные инструменты для выполнения вашего запроса.
                     """.trimIndent()

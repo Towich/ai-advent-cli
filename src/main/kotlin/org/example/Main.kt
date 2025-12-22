@@ -12,9 +12,13 @@ import org.example.application.ChatWithToolsService
 import kotlinx.serialization.json.Json
 import org.example.data.repository.GigaChatRepositoryImpl
 import org.example.data.repository.HuggingFaceRepositoryImpl
+import org.example.data.repository.OllamaRepositoryImpl
 import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
+import org.example.data.service.DocumentService
+import org.example.data.service.IndexService
 import org.example.domain.usecase.CompressDialogHistoryUseCase
+import org.example.domain.usecase.IndexDocumentsUseCase
 import org.example.domain.usecase.SendChatMessageUseCase
 import org.example.domain.usecase.SendMultiChatMessageUseCase
 import org.example.domain.usecase.SendChatMessageWithToolsUseCase
@@ -100,6 +104,17 @@ fun Application.module() {
 
     val chatWithToolsService = ChatWithToolsService(sendChatMessageWithToolsUseCase)
 
+    // Инициализация сервисов для индексации документов
+    val ollamaRepository = OllamaRepositoryImpl(apiUrl = AppConfig.ollamaHost)
+    val documentService = DocumentService(githubToken = AppConfig.githubToken)
+    val indexService = IndexService(indexPath = "${AppConfig.indexStoragePath}/index.json")
+    val indexDocumentsUseCase = IndexDocumentsUseCase(
+        ollamaRepository = ollamaRepository,
+        documentService = documentService,
+        indexService = indexService,
+        embeddingModel = AppConfig.ollamaEmbeddingModel
+    )
+
     val telegramNotifier = run {
         val token = AppConfig.telegramBotToken
         val chatId = AppConfig.telegramChatId
@@ -134,7 +149,10 @@ fun Application.module() {
                     defaultModel = AppConfig.telegramBotDefaultModel,
                     defaultMaxTokens = AppConfig.maxTokens,
                     defaultMcpServerUrls = AppConfig.mcpServerUrls,
-                    defaultMaxToolIterations = AppConfig.telegramBotDefaultMaxToolIterations
+                    defaultMaxToolIterations = AppConfig.telegramBotDefaultMaxToolIterations,
+                    indexDocumentsUseCase = indexDocumentsUseCase,
+                    indexService = indexService,
+                    githubRepoUrl = AppConfig.githubRepoUrl
                 )
             }
         } else {
@@ -174,6 +192,7 @@ fun Application.module() {
         perplexityRepository.close()
         gigaChatRepository.close()
         huggingFaceRepository.close()
+        ollamaRepository.close()
         sessionRepository.shutdown()
     }
 }

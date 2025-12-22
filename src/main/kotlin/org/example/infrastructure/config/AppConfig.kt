@@ -116,6 +116,30 @@ object AppConfig {
 
     val telegramBotDefaultMaxToolIterations: Int
         get() = System.getenv("TELEGRAM_BOT_DEFAULT_MAX_TOOL_ITERATIONS")?.toIntOrNull() ?: 10
+
+    /**
+     * Ollama configuration
+     */
+    val ollamaHost: String
+        get() = System.getenv("OLLAMA_HOST") ?: "http://127.0.0.1:11434"
+
+    val ollamaEmbeddingModel: String
+        get() = System.getenv("OLLAMA_EMBEDDING_MODEL") ?: "nomic-embed-text"
+
+    /**
+     * GitHub configuration
+     */
+    val githubToken: String?
+        get() = System.getenv("GITHUB_TOKEN")
+
+    val githubRepoUrl: String
+        get() = System.getenv("GITHUB_REPO_URL") ?: "https://github.com/Towich/life"
+
+    /**
+     * Index configuration
+     */
+    val indexStoragePath: String
+        get() = System.getenv("INDEX_STORAGE_PATH") ?: "index"
 }
 
 
