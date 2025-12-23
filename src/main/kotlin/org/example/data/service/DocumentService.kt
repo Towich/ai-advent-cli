@@ -9,8 +9,8 @@ import java.util.UUID
  */
 class DocumentService(
     private val githubToken: String? = null,
-    private val chunkSize: Int = 1000,
-    private val chunkOverlap: Int = 200
+    private val chunkSize: Int = 500,
+    private val chunkOverlap: Int = 50
 ) {
     private val logger = LoggerFactory.getLogger(DocumentService::class.java)
 

@@ -17,6 +17,7 @@ import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
 import org.example.data.service.DocumentService
 import org.example.data.service.IndexService
+import org.example.data.service.RAGSearchService
 import org.example.domain.usecase.CompressDialogHistoryUseCase
 import org.example.domain.usecase.IndexDocumentsUseCase
 import org.example.domain.usecase.SendChatMessageUseCase
@@ -114,6 +115,12 @@ fun Application.module() {
         indexService = indexService,
         embeddingModel = AppConfig.ollamaEmbeddingModel
     )
+    val ragSearchService = RAGSearchService(
+        indexService = indexService,
+        ollamaRepository = ollamaRepository,
+        embeddingModel = AppConfig.ollamaEmbeddingModel,
+        defaultTopK = 5
+    )
 
     val telegramNotifier = run {
         val token = AppConfig.telegramBotToken
@@ -152,6 +159,7 @@ fun Application.module() {
                     defaultMaxToolIterations = AppConfig.telegramBotDefaultMaxToolIterations,
                     indexDocumentsUseCase = indexDocumentsUseCase,
                     indexService = indexService,
+                    ragSearchService = ragSearchService,
                     githubRepoUrl = AppConfig.githubRepoUrl
                 )
             }

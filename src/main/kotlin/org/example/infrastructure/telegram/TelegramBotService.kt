@@ -18,6 +18,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.coroutines.launch
 import org.example.application.ChatWithToolsService
 import org.example.data.service.IndexService
+import org.example.data.service.RAGSearchService
 import org.example.domain.usecase.IndexDocumentsUseCase
 import org.example.infrastructure.config.VendorDetector
 import org.example.presentation.dto.ToolCallInfo
@@ -37,6 +38,7 @@ class TelegramBotService(
     private val defaultMaxToolIterations: Int = 10,
     private val indexDocumentsUseCase: IndexDocumentsUseCase? = null,
     private val indexService: IndexService? = null,
+    private val ragSearchService: RAGSearchService? = null,
     private val githubRepoUrl: String = "https://github.com/Towich/life"
 ) {
     private val logger = LoggerFactory.getLogger(TelegramBotService::class.java)
@@ -413,12 +415,183 @@ class TelegramBotService(
                     Result.success("Информация об индексе отправлена")
                 }
 
+                command.startsWith("/rag", ignoreCase = true) -> {
+                    val question = args?.trim() ?: return Result.failure(
+                        IllegalArgumentException("Команда /rag требует вопрос. Использование: /rag <ваш вопрос> [topK=5]")
+                    )
+
+                    logger.info("=== RAG запрос от пользователя $chatId ===")
+                    logger.info("Вопрос: $question")
+
+                    if (ragSearchService == null) {
+                        logger.error("RAG сервис не настроен для пользователя $chatId")
+                        sendMessage(chatId, "❌ Сервис RAG не настроен")
+                        return Result.failure(IllegalStateException("Сервис RAG не настроен"))
+                    }
+
+                    // Парсим параметры (поддержка формата: /rag вопрос topK=10)
+                    var topK = 5
+                    var actualQuestion = question
+                    val topKRegex = "\\s+topK=(\\d+)\\s*$".toRegex()
+                    val topKMatch = topKRegex.find(question)
+                    if (topKMatch != null) {
+                        topKMatch.groupValues.getOrNull(1)?.toIntOrNull()?.let {
+                            topK = it.coerceIn(1, 20) // Ограничение от 1 до 20
+                            logger.info("Параметр topK установлен: $topK")
+                        }
+                        // Убираем параметр из вопроса
+                        actualQuestion = question.replace(topKRegex, "").trim()
+                        logger.debug("Вопрос после удаления параметра: $actualQuestion")
+                    }
+
+                    // Отправляем сообщение о начале обработки
+                    logger.info("Отправка уведомления о начале поиска документов")
+                    sendMessage(chatId, "🔍 Ищу релевантные документы (topK=$topK)...")
+
+                    // Ищем релевантные чанки
+                    logger.info("Запуск поиска релевантных чанков (topK=$topK)")
+                    val searchResult = ragSearchService.searchRelevantChunks(actualQuestion, topK = topK)
+                    
+                    searchResult.fold(
+                        onSuccess = { result ->
+                            logger.info("Поиск завершен успешно. Найдено чанков: ${result.chunks.size}")
+                            
+                            if (result.chunks.isEmpty()) {
+                                logger.warn("Релевантные документы не найдены для вопроса: $actualQuestion")
+                                sendMessage(chatId, "❌ Релевантные документы не найдены. Убедитесь, что индекс создан (/index).")
+                                return@fold
+                            }
+
+                            logger.info("Форматирование контекста из ${result.chunks.size} найденных чанков")
+                            
+                            // Собираем список уникальных документов с количеством чанков
+                            val documentsWithCounts = result.chunks
+                                .groupBy { chunk ->
+                                    // Извлекаем имя файла из пути
+                                    val fileName = java.io.File(chunk.filePath).name
+                                    // Убираем расширение .md для красоты
+                                    fileName.removeSuffix(".md")
+                                }
+                                .map { (docName, chunks) ->
+                                    docName to chunks.size
+                                }
+                                .sortedBy { it.first }
+                            
+                            // Отправляем сообщение со списком документов
+                            if (documentsWithCounts.isNotEmpty()) {
+                                val documentsMessage = buildString {
+                                    append("📄 *Использованы документы:*\n\n")
+                                    documentsWithCounts.forEachIndexed { index, (docName, chunkCount) ->
+                                        val chunkText = if (chunkCount == 1) "фрагмент" else "фрагмента"
+                                        append("${index + 1}. *$docName* ($chunkCount $chunkText)\n")
+                                    }
+                                    append("\n_Всего фрагментов: ${result.chunks.size}_")
+                                }
+                                logger.info("Отправка списка использованных документов (${documentsWithCounts.size} документов)")
+                                sendMessage(chatId, documentsMessage, parseMode = "Markdown")
+                            }
+                            
+                            // Форматируем контекст из найденных чанков
+                            val context = ragSearchService.formatChunksAsContext(result)
+                            logger.debug("Длина сформированного контекста: ${context.length} символов")
+                            
+                            // Формируем промпт с контекстом
+                            val enhancedPrompt = buildString {
+                                append(context)
+                                append("\n\n---\n\n")
+                                append("Вопрос пользователя: ")
+                                append(actualQuestion)
+                                append("\n\nОтветь на вопрос пользователя, используя информацию из предоставленных фрагментов документов. ")
+                                append("Если информация в документах не содержит ответа на вопрос, скажи об этом честно.")
+                            }
+
+                            logger.info("Длина финального промпта: ${enhancedPrompt.length} символов")
+
+                            // Получаем настройки пользователя
+                            val settings = getUserSettings(chatId)
+                            logger.info("Настройки пользователя: vendor=${settings.vendor}, model=${settings.model}, maxTokens=${settings.maxTokens}")
+
+                            // Отправляем сообщение о начале генерации ответа
+                            logger.info("Отправка уведомления о начале генерации ответа")
+                            sendMessage(chatId, "🤖 Генерирую ответ на основе найденных документов...")
+
+                            // Создаем колбэк для уведомлений о тулзах в реальном времени
+                            val onToolCall: suspend (ToolCallInfo) -> Unit = { toolCall ->
+                                logger.info("Колбэк onToolCall вызван для тула: ${toolCall.toolName}")
+                                try {
+                                    sendToolCallNotification(chatId, toolCall)
+                                } catch (e: Exception) {
+                                    logger.error("Ошибка при отправке уведомления о туле в колбэке: ${e.message}", e)
+                                }
+                            }
+
+                            // Выполняем запрос к LLM с контекстом
+                            logger.info("Выполнение запроса к LLM через ChatWithToolsService")
+                            val llmResult = chatWithToolsService.execute(
+                                ChatWithToolsService.Command(
+                                    message = enhancedPrompt,
+                                    vendor = settings.vendor,
+                                    model = settings.model,
+                                    maxTokens = settings.maxTokens,
+                                    mcpServerUrls = defaultMcpServerUrls,
+                                    maxToolIterations = defaultMaxToolIterations,
+                                    onToolCall = onToolCall
+                                )
+                            )
+
+                            llmResult.fold(
+                                onSuccess = { chatResult ->
+                                    logger.info("=== TelegramBotService RAG: получен успешный результат от LLM ===")
+                                    logger.info("Длина ответа: ${chatResult.content.length} символов")
+                                    logger.info("Использовано инструментов: ${chatResult.toolCalls.size}")
+                                    
+                                    // Отправляем финальный результат
+                                    val finalMessage = buildString {
+                                        append("✅ Ответ на основе документов:\n\n")
+                                        append(chatResult.content)
+                                        append("\n\n")
+                                        append("📚 Использовано фрагментов: ${result.chunks.size}")
+                                    }
+
+                                    logger.info("Отправка финального сообщения в Telegram (chatId: $chatId, длина: ${finalMessage.length})")
+                                    val sendResult = sendMessage(chatId, finalMessage, parseMode = null)
+                                    sendResult.fold(
+                                        onSuccess = {
+                                            logger.info("✅ Сообщение успешно отправлено в Telegram")
+                                        },
+                                        onFailure = { error ->
+                                            logger.error("❌ Ошибка при отправке сообщения в Telegram: ${error.message}", error)
+                                        }
+                                    )
+                                },
+                                onFailure = { error ->
+                                    logger.error("Ошибка при генерации ответа от LLM: ${error.message}", error)
+                                    logger.error("Тип ошибки: ${error.javaClass.simpleName}")
+                                    val errorMessage = "❌ Ошибка при генерации ответа: ${error.message ?: "Неизвестная ошибка"}"
+                                    sendMessage(chatId, errorMessage)
+                                }
+                            )
+                        },
+                        onFailure = { error ->
+                            logger.error("=== Ошибка при поиске документов ===")
+                            logger.error("Тип ошибки: ${error.javaClass.simpleName}")
+                            logger.error("Сообщение ошибки: ${error.message}")
+                            logger.error("Стек трейс:", error)
+                            val errorMessage = "❌ Ошибка при поиске документов: ${error.message ?: "Неизвестная ошибка"}"
+                            sendMessage(chatId, errorMessage)
+                        }
+                    )
+                    
+                    Result.success("RAG запрос обработан")
+                }
+
                 command == "/start" || command == "/help" -> {
                     val helpText = """
                         🤖 *AI Chat Bot с поддержкой инструментов*
                         
                         *Команды:*
                         /chat <сообщение> - Отправить запрос AI с использованием инструментов
+                        /rag <вопрос> [topK=5] - Поиск релевантных документов и ответ на основе индекса (RAG)
                         /vendor - Показать текущий вендор
                         /vendor <название> - Изменить вендор (perplexity, gigachat, huggingface)
                         /model - Показать текущую модель
@@ -431,6 +604,8 @@ class TelegramBotService(
                         
                         *Примеры:*
                         /chat Какая погода в Москве?
+                        /rag Что я планировал на четвертый квартал?
+                        /rag Какие проекты связаны с AI? topK=10
                         /vendor gigachat
                         /model GigaChat-2
                         /maxtokens 512

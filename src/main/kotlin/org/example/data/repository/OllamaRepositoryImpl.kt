@@ -55,38 +55,85 @@ class OllamaRepositoryImpl(
 
     override suspend fun generateEmbedding(text: String, model: String): Result<List<Float>> {
         return try {
-            logger.debug("Генерация эмбеддинга для текста длиной ${text.length} символов, модель: $model")
+            logger.info("Генерация эмбеддинга для текста длиной ${text.length} символов, модель: $model")
+            logger.debug("URL Ollama API: $apiUrl/api/embed")
+            logger.debug("Текст запроса (первые 100 символов): ${text.take(100)}")
             
             val request = EmbedRequest(model = model, input = text)
             val url = "$apiUrl/api/embed"
             
+            logger.debug("Отправка POST запроса к Ollama API: $url")
             val httpResponse = client.post(url) {
                 contentType(ContentType.Application.Json)
                 setBody(request)
             }
             
             val statusCode = httpResponse.status.value
+            logger.info("Получен ответ от Ollama API: HTTP $statusCode")
+            
+            // Читаем тело ответа как строку один раз для логирования и парсинга
+            val responseBodyString = try {
+                httpResponse.body<String>()
+            } catch (e: Exception) {
+                logger.error("Не удалось прочитать тело ответа: ${e.message}", e)
+                return Result.failure(Exception("Не удалось прочитать тело ответа от Ollama API: ${e.message}"))
+            }
+            
+            logger.debug("Тело ответа от Ollama API (первые 500 символов): ${responseBodyString.take(500)}")
+            logger.debug("Полная длина тела ответа: ${responseBodyString.length} символов")
+            
             if (statusCode !in 200..299) {
-                val errorBody = try {
-                    httpResponse.body<String>()
-                } catch (e: Exception) {
-                    "Не удалось прочитать тело ответа: ${e.message}"
-                }
-                val errorMessage = "Ошибка при запросе к Ollama API (HTTP $statusCode): $errorBody"
-                logger.error(errorMessage)
+                val errorMessage = "Ошибка при запросе к Ollama API (HTTP $statusCode): $responseBodyString"
+                logger.error("Ошибка HTTP от Ollama API: $errorMessage")
+                logger.error("Полное тело ответа об ошибке: $responseBodyString")
                 return Result.failure(Exception(errorMessage))
             }
             
-            val response: EmbedResponse = httpResponse.body()
-            val embedding = response.embedding
-                ?: return Result.failure(Exception("Пустой ответ от Ollama API"))
+            // Парсим ответ из строки
+            val response: EmbedResponse = try {
+                jsonSerializer.decodeFromString<EmbedResponse>(responseBodyString)
+            } catch (e: Exception) {
+                logger.error("Ошибка при парсинге ответа от Ollama API: ${e.message}", e)
+                logger.error("Тело ответа, которое не удалось распарсить: $responseBodyString")
+                return Result.failure(Exception("Ошибка при парсинге ответа от Ollama API: ${e.message}"))
+            }
+            
+            logger.debug("Ответ распарсен успешно. embedding: ${response.embedding != null}, embeddings: ${response.embeddings != null}")
+            
+            // Используем поле embeddings (множественное число) - это основной формат ответа от Ollama
+            val embedding: List<Double>? = if (response.embeddings != null && response.embeddings.isNotEmpty()) {
+                logger.debug("Используется поле 'embeddings', количество: ${response.embeddings.size}")
+                // Берем первый эмбеддинг из массива
+                response.embeddings.firstOrNull()
+            } else if (response.embedding != null) {
+                logger.debug("Используется поле 'embedding' (для обратной совместимости)")
+                response.embedding
+            } else {
+                null
+            }
+            
+            if (embedding == null) {
+                logger.error("Пустой ответ от Ollama API: поля 'embeddings' и 'embedding' отсутствуют или null")
+                logger.error("Поле 'embeddings': ${response.embeddings}")
+                logger.error("Поле 'embedding': ${response.embedding}")
+                logger.error("Полное тело ответа: $responseBodyString")
+                return Result.failure(Exception("Пустой ответ от Ollama API: поля 'embeddings' и 'embedding' отсутствуют"))
+            }
+            
+            if (embedding.isEmpty()) {
+                logger.error("Эмбеддинг пустой (размер: 0)")
+                return Result.failure(Exception("Пустой эмбеддинг от Ollama API (размер: 0)"))
+            }
             
             val floatEmbedding = embedding.map { it.toFloat() }
-            logger.debug("Эмбеддинг сгенерирован, размерность: ${floatEmbedding.size}")
+            logger.info("Эмбеддинг сгенерирован успешно, размерность: ${floatEmbedding.size}")
+            logger.debug("Первые 5 значений эмбеддинга: ${floatEmbedding.take(5)}")
             
             Result.success(floatEmbedding)
         } catch (e: Exception) {
-            logger.error("Ошибка при генерации эмбеддинга: ${e.message}", e)
+            logger.error("Исключение при генерации эмбеддинга: ${e.message}", e)
+            logger.error("Тип исключения: ${e.javaClass.simpleName}")
+            e.printStackTrace()
             Result.failure(e)
         }
     }
