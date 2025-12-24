@@ -46,3 +46,4 @@ bin/
 
 ### Application Data ###
 session_memory.json
+/index/index.json
