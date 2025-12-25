@@ -4,6 +4,7 @@ import org.example.domain.model.DialogSession
 import org.example.domain.model.Message
 import org.example.domain.repository.GigaChatRepository
 import org.example.domain.repository.HuggingFaceRepository
+import org.example.domain.repository.LocalRepository
 import org.example.domain.repository.PerplexityRepository
 import org.example.infrastructure.config.Vendor
 import org.slf4j.LoggerFactory
@@ -15,7 +16,8 @@ import org.slf4j.LoggerFactory
 class CompressDialogHistoryUseCase(
     private val perplexityRepository: PerplexityRepository,
     private val gigaChatRepository: GigaChatRepository,
-    private val huggingFaceRepository: HuggingFaceRepository
+    private val huggingFaceRepository: HuggingFaceRepository,
+    private val localRepository: LocalRepository
 ) {
     private val logger = LoggerFactory.getLogger(CompressDialogHistoryUseCase::class.java)
     
@@ -117,6 +119,13 @@ class CompressDialogHistoryUseCase(
                 temperature = null
             )
             Vendor.HUGGINGFACE -> huggingFaceRepository.sendMessage(
+                messages = messagesForSummary,
+                model = model,
+                maxTokens = session.maxTokens,
+                disableSearch = true,
+                temperature = null
+            )
+            Vendor.LOCAL -> localRepository.sendMessage(
                 messages = messagesForSummary,
                 model = model,
                 maxTokens = session.maxTokens,
@@ -229,6 +238,13 @@ class CompressDialogHistoryUseCase(
                 temperature = null
             )
             Vendor.HUGGINGFACE -> huggingFaceRepository.sendMessage(
+                messages = messagesForSummary,
+                model = model,
+                maxTokens = session.maxTokens,
+                disableSearch = true,
+                temperature = null
+            )
+            Vendor.LOCAL -> localRepository.sendMessage(
                 messages = messagesForSummary,
                 model = model,
                 maxTokens = session.maxTokens,

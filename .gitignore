@@ -46,3 +46,5 @@ bin/
 
 ### Application Data ###
 session_memory.json
+/telegram_chat_history/
+/index/index.json

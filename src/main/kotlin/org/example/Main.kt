@@ -12,6 +12,7 @@ import org.example.application.ChatWithToolsService
 import kotlinx.serialization.json.Json
 import org.example.data.repository.GigaChatRepositoryImpl
 import org.example.data.repository.HuggingFaceRepositoryImpl
+import org.example.data.repository.LocalRepositoryImpl
 import org.example.data.repository.PerplexityRepositoryImpl
 import org.example.data.repository.SessionRepositoryImpl
 import org.example.domain.usecase.CompressDialogHistoryUseCase
@@ -65,11 +66,15 @@ fun Application.module() {
             "Установите переменную окружения: export HUGGINGFACE_API_KEY=your_api_key"
         )
     )
+    val localRepository = LocalRepositoryImpl(
+        apiUrl = AppConfig.localApiUrl
+    )
     
     val compressDialogHistoryUseCase = CompressDialogHistoryUseCase(
         perplexityRepository = perplexityRepository,
         gigaChatRepository = gigaChatRepository,
-        huggingFaceRepository = huggingFaceRepository
+        huggingFaceRepository = huggingFaceRepository,
+        localRepository = localRepository
     )
     
     val sendChatMessageUseCase = SendChatMessageUseCase(
@@ -77,6 +82,7 @@ fun Application.module() {
         perplexityRepository = perplexityRepository,
         gigaChatRepository = gigaChatRepository,
         huggingFaceRepository = huggingFaceRepository,
+        localRepository = localRepository,
         compressDialogHistoryUseCase = compressDialogHistoryUseCase,
         defaultModel = AppConfig.model,
         defaultMaxTokens = AppConfig.maxTokens
@@ -86,6 +92,7 @@ fun Application.module() {
         perplexityRepository = perplexityRepository,
         gigaChatRepository = gigaChatRepository,
         huggingFaceRepository = huggingFaceRepository,
+        localRepository = localRepository,
         defaultModel = AppConfig.model,
         defaultMaxTokens = AppConfig.maxTokens
     )
@@ -94,6 +101,7 @@ fun Application.module() {
         perplexityRepository = perplexityRepository,
         gigaChatRepository = gigaChatRepository,
         huggingFaceRepository = huggingFaceRepository,
+        localRepository = localRepository,
         defaultModel = AppConfig.model,
         defaultMaxTokens = AppConfig.maxTokens
     )
@@ -174,6 +182,7 @@ fun Application.module() {
         perplexityRepository.close()
         gigaChatRepository.close()
         huggingFaceRepository.close()
+        localRepository.close()
         sessionRepository.shutdown()
     }
 }

@@ -8,6 +8,7 @@ import org.example.domain.model.Message
 import org.example.domain.model.TokenUsage
 import org.example.domain.repository.GigaChatRepository
 import org.example.domain.repository.HuggingFaceRepository
+import org.example.domain.repository.LocalRepository
 import org.example.domain.repository.PerplexityRepository
 import org.example.infrastructure.config.Vendor
 import org.example.infrastructure.config.VendorDetector
@@ -19,6 +20,7 @@ class SendMultiChatMessageUseCase(
     private val perplexityRepository: PerplexityRepository,
     private val gigaChatRepository: GigaChatRepository,
     private val huggingFaceRepository: HuggingFaceRepository,
+    private val localRepository: LocalRepository,
     private val defaultModel: String,
     private val defaultMaxTokens: Int
 ) {
@@ -88,6 +90,13 @@ class SendMultiChatMessageUseCase(
                             temperature
                         )
                         Vendor.HUGGINGFACE -> huggingFaceRepository.sendMessage(
+                            messages,
+                            model,
+                            maxTokensValue,
+                            disableSearchValue,
+                            temperature
+                        )
+                        Vendor.LOCAL -> localRepository.sendMessage(
                             messages,
                             model,
                             maxTokensValue,

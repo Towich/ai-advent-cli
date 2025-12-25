@@ -51,6 +51,11 @@ class TelegramBotService(
     private val chatHistoryManager = ChatHistoryManager()
     
     /**
+     * Хранилище настроек пользователей для сохранения между перезапусками
+     */
+    private val settingsStorage = UserSettingsStorage()
+    
+    /**
      * Хранилище активных диалогов (chatId -> true/false)
      * true означает, что пользователь находится в режиме диалога
      */
@@ -68,15 +73,106 @@ class TelegramBotService(
     private val userSettings = ConcurrentHashMap<Long, UserSettings>()
     
     /**
+     * Список доступных вендоров
+     */
+    private val availableVendors = listOf(
+        "perplexity",
+        "gigachat",
+        "huggingface",
+        "local"
+    )
+    
+    /**
+     * Список доступных моделей по вендорам
+     */
+    private val availableModels = mapOf(
+        "perplexity" to listOf(
+            "sonar",
+            "sonar-pro",
+            "sonar-reasoning",
+            "sonar-reasoning-pro",
+            "sonar-deep-research"
+        ),
+        "gigachat" to listOf(
+            "GigaChat-2",
+            "GigaChat-Pro",
+            "GigaChat-Max"
+        ),
+        "huggingface" to listOf(
+            "meta-llama/Llama-3.1-8B-Instruct",
+            "meta-llama/Llama-3.1-70B-Instruct",
+            "mistralai/Mistral-7B-Instruct-v0.2",
+            "mistralai/Mixtral-8x7B-Instruct-v0.1",
+            "google/gemma-7b-it",
+            "Qwen/Qwen2.5-7B-Instruct"
+        ),
+        "local" to listOf(
+            "qwen2.5",
+            "llama3.1",
+            "mistral"
+        )
+    )
+    
+    init {
+        // Загружаем сохраненные настройки пользователей при старте
+        loadSavedSettings()
+    }
+    
+    /**
+     * Загружает сохраненные настройки пользователей из файла
+     */
+    private fun loadSavedSettings() {
+        try {
+            val savedSettings = settingsStorage.loadAllSettings()
+            savedSettings.forEach { (chatId, settingsData) ->
+                userSettings[chatId] = UserSettings(
+                    vendor = settingsData.vendor,
+                    model = settingsData.model,
+                    maxTokens = settingsData.maxTokens
+                )
+            }
+            logger.info("Загружены сохраненные настройки для ${savedSettings.size} пользователей")
+        } catch (e: Exception) {
+            logger.error("Ошибка при загрузке сохраненных настроек: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Сохраняет настройки пользователя в файл
+     */
+    private fun saveUserSettings(chatId: Long, settings: UserSettings) {
+        try {
+            val settingsData = UserSettingsStorage.UserSettingsData(
+                vendor = settings.vendor,
+                model = settings.model,
+                maxTokens = settings.maxTokens
+            )
+            settingsStorage.saveUserSettings(chatId, settingsData)
+        } catch (e: Exception) {
+            logger.error("Ошибка при сохранении настроек пользователя: ${e.message}", e)
+        }
+    }
+    
+    /**
      * Получает настройки пользователя или создает дефолтные
      */
     private fun getUserSettings(chatId: Long): UserSettings {
         return userSettings.getOrPut(chatId) {
-            UserSettings(
-                vendor = defaultVendor,
-                model = defaultModel,
-                maxTokens = defaultMaxTokens
-            )
+            // Сначала пытаемся загрузить из сохраненных настроек
+            val savedSettings = settingsStorage.loadUserSettings(chatId)
+            if (savedSettings != null) {
+                UserSettings(
+                    vendor = savedSettings.vendor,
+                    model = savedSettings.model,
+                    maxTokens = savedSettings.maxTokens
+                )
+            } else {
+                UserSettings(
+                    vendor = defaultVendor,
+                    model = defaultModel,
+                    maxTokens = defaultMaxTokens
+                )
+            }
         }
     }
 
@@ -470,21 +566,30 @@ class TelegramBotService(
                 command == "/vendor" -> {
                     val vendorArg = args?.trim()?.lowercase()
                     if (vendorArg.isNullOrBlank()) {
-                        // Показываем текущий вендор
+                        // Показываем текущий вендор и список доступных
                         val settings = getUserSettings(chatId)
-                        sendMessage(chatId, "Текущий вендор: ${settings.vendor}")
-                        Result.success("Текущий вендор показан")
+                        val vendorList = availableVendors.joinToString("\n• ", "• ")
+                        val message = buildString {
+                            append("Текущий вендор: ${settings.vendor}\n\n")
+                            append("📋 Доступные вендоры:\n")
+                            append(vendorList)
+                        }
+                        sendMessage(chatId, message)
+                        Result.success("Текущий вендор и список показаны")
                     } else {
                         // Меняем вендор
                         val vendor = VendorDetector.parseVendor(vendorArg)
                         if (vendor == null) {
-                            val validVendors = "perplexity, gigachat, huggingface"
-                            sendMessage(chatId, "❌ Неизвестный вендор: $vendorArg\n\nДоступные вендоры: $validVendors")
+                            val vendorList = availableVendors.joinToString("\n• ", "• ")
+                            sendMessage(chatId, "❌ Неизвестный вендор: $vendorArg\n\n📋 Доступные вендоры:\n$vendorList")
                             Result.failure(IllegalArgumentException("Неизвестный вендор: $vendorArg"))
                         } else {
                             val settings = getUserSettings(chatId)
                             settings.vendor = vendorArg
-                            sendMessage(chatId, "✅ Вендор изменен на: ${settings.vendor}")
+                            // Сбрасываем модель при смене вендора (чтобы пользователь выбрал подходящую)
+                            settings.model = null
+                            saveUserSettings(chatId, settings)
+                            sendMessage(chatId, "✅ Вендор изменен на: ${settings.vendor}\n\n💡 Модель сброшена. Используйте /model для выбора модели.")
                             Result.success("Вендор изменен")
                         }
                     }
@@ -493,15 +598,30 @@ class TelegramBotService(
                 command == "/model" -> {
                     val modelArg = args?.trim()
                     if (modelArg.isNullOrBlank()) {
-                        // Показываем текущую модель
+                        // Показываем текущую модель и список доступных для текущего вендора
                         val settings = getUserSettings(chatId)
-                        val modelText = settings.model ?: "не установлена (используется по умолчанию)"
-                        sendMessage(chatId, "Текущая модель: $modelText")
-                        Result.success("Текущая модель показана")
+                        val currentVendor = settings.vendor
+                        val modelsForVendor = availableModels[currentVendor] ?: emptyList()
+                        
+                        val message = buildString {
+                            val modelText = settings.model ?: "не установлена (используется по умолчанию)"
+                            append("Текущая модель: $modelText\n")
+                            append("Текущий вендор: $currentVendor\n\n")
+                            
+                            if (modelsForVendor.isNotEmpty()) {
+                                append("📋 Доступные модели для $currentVendor:\n")
+                                append(modelsForVendor.joinToString("\n• ", "• "))
+                            } else {
+                                append("📋 Для вендора $currentVendor можно указать любую модель")
+                            }
+                        }
+                        sendMessage(chatId, message)
+                        Result.success("Текущая модель и список показаны")
                     } else {
                         // Меняем модель
                         val settings = getUserSettings(chatId)
                         settings.model = modelArg
+                        saveUserSettings(chatId, settings)
                         sendMessage(chatId, "✅ Модель изменена на: ${settings.model}")
                         Result.success("Модель изменена")
                     }
@@ -524,6 +644,7 @@ class TelegramBotService(
                         } else {
                             val settings = getUserSettings(chatId)
                             settings.maxTokens = maxTokensValue
+                            saveUserSettings(chatId, settings)
                             sendMessage(chatId, "✅ Ограничение токенов изменено на: ${settings.maxTokens}")
                             Result.success("Ограничение токенов изменено")
                         }

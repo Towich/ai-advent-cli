@@ -9,6 +9,7 @@ object AppConfig {
     private const val DEFAULT_MODEL = "GigaChat-2"
     private const val DEFAULT_GIGACHAT_API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
     private const val DEFAULT_HUGGINGFACE_API_URL = "https://router.huggingface.co/v1/chat/completions"
+    private const val DEFAULT_LOCAL_API_URL = "http://localhost:7999/v1/chat/completions"
     private const val DEFAULT_SERVER_PORT = 8080
     private const val DEFAULT_MAX_TOKENS = 256
     private const val DEFAULT_MCP_SERVER_URL = "http://localhost:8002/mcp"
@@ -47,6 +48,9 @@ object AppConfig {
     
     val huggingFaceApiUrl: String
         get() = System.getenv("HUGGINGFACE_API_URL") ?: DEFAULT_HUGGINGFACE_API_URL
+    
+    val localApiUrl: String
+        get() = System.getenv("LOCAL_API_URL") ?: DEFAULT_LOCAL_API_URL
     
     val serverPort: Int
         get() = System.getenv("SERVER_PORT")?.toIntOrNull() ?: DEFAULT_SERVER_PORT

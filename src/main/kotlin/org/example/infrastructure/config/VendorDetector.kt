@@ -6,7 +6,8 @@ package org.example.infrastructure.config
 enum class Vendor {
     PERPLEXITY,
     GIGACHAT,
-    HUGGINGFACE
+    HUGGINGFACE,
+    LOCAL
 }
 
 object VendorDetector {
@@ -22,6 +23,7 @@ object VendorDetector {
             "perplexity" -> Vendor.PERPLEXITY
             "gigachat" -> Vendor.GIGACHAT
             "huggingface" -> Vendor.HUGGINGFACE
+            "local" -> Vendor.LOCAL
             else -> null
         }
     }
@@ -42,6 +44,8 @@ object VendorDetector {
             modelLower.contains("huggingface") || 
             modelLower.contains("meta-llama") ||
             modelLower.contains("mistral") -> Vendor.HUGGINGFACE
+            modelLower.contains("qwen") || 
+            modelLower.contains("local") -> Vendor.LOCAL
             else -> null
         }
     }
