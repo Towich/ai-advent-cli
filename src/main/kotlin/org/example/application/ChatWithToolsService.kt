@@ -1,5 +1,6 @@
 package org.example.application
 
+import org.example.domain.model.Message
 import org.example.domain.usecase.SendChatMessageWithToolsUseCase
 import org.example.presentation.dto.ToolCallInfo
 
@@ -22,7 +23,8 @@ class ChatWithToolsService(
         val temperature: Double? = null,
         val mcpServerUrls: List<String>,
         val maxToolIterations: Int? = 10,
-        val onToolCall: (suspend (ToolCallInfo) -> Unit)? = null
+        val onToolCall: (suspend (ToolCallInfo) -> Unit)? = null,
+        val historyMessages: List<Message> = emptyList() // История диалога для контекста
     )
 
     suspend fun execute(command: Command): Result<SendChatMessageWithToolsUseCase.ChatWithToolsResult> {
@@ -41,7 +43,8 @@ class ChatWithToolsService(
             temperature = command.temperature,
             mcpServerUrls = command.mcpServerUrls,
             maxToolIterations = maxToolIterations,
-            onToolCall = command.onToolCall
+            onToolCall = command.onToolCall,
+            historyMessages = command.historyMessages
         )
     }
 

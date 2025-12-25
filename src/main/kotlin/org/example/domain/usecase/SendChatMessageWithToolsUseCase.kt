@@ -61,7 +61,8 @@ class SendChatMessageWithToolsUseCase(
         temperature: Double?,
         mcpServerUrls: List<String>,
         maxToolIterations: Int,
-        onToolCall: (suspend (ToolCallInfo) -> Unit)? = null
+        onToolCall: (suspend (ToolCallInfo) -> Unit)? = null,
+        historyMessages: List<Message> = emptyList() // История диалога для контекста
     ): Result<ChatWithToolsResult> {
         val startTime = System.currentTimeMillis()
         val mcpRepositories = mutableMapOf<String, McpRepositoryImpl>()
@@ -144,7 +145,20 @@ class SendChatMessageWithToolsUseCase(
             if (toolsSystemPrompt.isNotEmpty()) {
                 messages.add(Message(role = Message.ROLE_SYSTEM, content = toolsSystemPrompt))
             }
+            
+            // Добавляем историю диалога (исключая system сообщения, они уже добавлены)
+            val historyWithoutSystem = historyMessages.filter { it.role != Message.ROLE_SYSTEM }
+            logger.info("Добавляю историю диалога: ${historyWithoutSystem.size} сообщений")
+            historyWithoutSystem.forEachIndexed { index, msg ->
+                logger.debug("История[$index]: role=${msg.role}, content=${msg.content.take(100)}...")
+            }
+            messages.addAll(historyWithoutSystem)
+            
+            // Добавляем новое сообщение пользователя
+            logger.info("Добавляю новое сообщение пользователя: ${message.take(100)}...")
             messages.add(Message(role = Message.ROLE_USER, content = message))
+            
+            logger.info("Всего сообщений для отправки в LLM: ${messages.size}")
             
             // Переменные для отслеживания итераций
             var currentIteration = 0

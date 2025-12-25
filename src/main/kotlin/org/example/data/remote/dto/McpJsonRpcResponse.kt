@@ -41,3 +41,4 @@ data class McpJsonRpcError(
     val data: kotlinx.serialization.json.JsonElement? = null
 )
 
+

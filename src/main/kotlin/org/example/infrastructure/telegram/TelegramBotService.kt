@@ -15,6 +15,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import org.example.application.ChatWithToolsService
 import org.example.infrastructure.config.VendorDetector
 import org.example.presentation.dto.ToolCallInfo
@@ -43,6 +44,17 @@ class TelegramBotService(
             json(jsonParser)
         }
     }
+    
+    /**
+     * Менеджер истории диалогов
+     */
+    private val chatHistoryManager = ChatHistoryManager()
+    
+    /**
+     * Хранилище активных диалогов (chatId -> true/false)
+     * true означает, что пользователь находится в режиме диалога
+     */
+    private val activeDialogs = ConcurrentHashMap<Long, Boolean>()
     
     /**
      * Хранилище настроек пользователей (chatId -> настройки)
@@ -180,6 +192,112 @@ class TelegramBotService(
     }
 
     /**
+     * Извлекает список источников (названия файлов) из результатов инструмента search_documents
+     */
+    private fun extractSourcesFromToolCalls(toolCalls: List<ToolCallInfo>): List<String> {
+        val sources = mutableSetOf<String>()
+        
+        // Ищем все вызовы инструмента search_documents
+        val searchDocumentsCalls = toolCalls.filter { 
+            it.toolName.contains("search_documents", ignoreCase = true) && it.success
+        }
+        
+        if (searchDocumentsCalls.isEmpty()) {
+            return emptyList()
+        }
+        
+        // Парсим результаты каждого вызова
+        searchDocumentsCalls.forEach { toolCall ->
+            val result = toolCall.result ?: return@forEach
+            
+            try {
+                // Пытаемся распарсить результат как JSON
+                val jsonElement = jsonParser.parseToJsonElement(result)
+                
+                when {
+                    // Если результат - массив объектов
+                    jsonElement is kotlinx.serialization.json.JsonArray -> {
+                        jsonElement.forEach { item ->
+                            try {
+                                val obj = item.jsonObject
+                                extractSourceFromJsonObject(obj, sources)
+                            } catch (e: Exception) {
+                                logger.debug("Не удалось обработать элемент массива: ${e.message}")
+                            }
+                        }
+                    }
+                    // Если результат - объект
+                    jsonElement is kotlinx.serialization.json.JsonObject -> {
+                        // Проверяем, есть ли массив results
+                        val resultsArray = jsonElement["results"]?.jsonArray
+                        if (resultsArray != null) {
+                            resultsArray.forEach { item ->
+                                try {
+                                    val obj = item.jsonObject
+                                    extractSourceFromJsonObject(obj, sources)
+                                } catch (e: Exception) {
+                                    logger.debug("Не удалось обработать элемент results: ${e.message}")
+                                }
+                            }
+                        } else {
+                            // Пытаемся извлечь источник из самого объекта
+                            extractSourceFromJsonObject(jsonElement, sources)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Если не удалось распарсить как JSON, пытаемся найти названия файлов в тексте
+                logger.debug("Не удалось распарсить результат search_documents как JSON: ${e.message}")
+                extractSourcesFromText(result, sources)
+            }
+        }
+        
+        return sources.sorted()
+    }
+    
+    /**
+     * Извлекает источник из JSON объекта
+     */
+    private fun extractSourceFromJsonObject(jsonObj: kotlinx.serialization.json.JsonObject, sources: MutableSet<String>) {
+        // Проверяем различные возможные поля с названием файла
+        val possibleFields = listOf("source", "file", "filename", "path", "filepath", "document", "name")
+        
+        possibleFields.forEach { fieldName ->
+            try {
+                jsonObj[fieldName]?.jsonPrimitive?.content?.let { source ->
+                    if (source.isNotBlank()) {
+                        sources.add(source)
+                    }
+                }
+            } catch (e: Exception) {
+                // Пропускаем, если поле не является примитивом
+                logger.debug("Поле $fieldName не является примитивом: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Извлекает источники из текста (если результат не JSON)
+     */
+    private fun extractSourcesFromText(text: String, sources: MutableSet<String>) {
+        // Ищем паттерны типа "file: filename.md" или "source: path/to/file.md"
+        val patterns = listOf(
+            Regex("""(?:file|source|filename|path|document)[:\s]+([^\s\n,]+\.(?:md|txt|pdf|docx?))""", RegexOption.IGNORE_CASE),
+            Regex("""(?:from|in)\s+([^\s\n,]+\.(?:md|txt|pdf|docx?))""", RegexOption.IGNORE_CASE),
+            Regex("""([^\s\n,]+\.(?:md|txt|pdf|docx?))""", RegexOption.IGNORE_CASE)
+        )
+        
+        patterns.forEach { pattern ->
+            pattern.findAll(text).forEach { match ->
+                val source = match.groupValues.getOrNull(1) ?: match.value
+                if (source.isNotBlank() && !source.startsWith("http")) {
+                    sources.add(source.trim())
+                }
+            }
+        }
+    }
+
+    /**
      * Отправляет сообщение о выполнении тула
      */
     suspend fun sendToolCallNotification(chatId: Long, toolCall: ToolCallInfo) {
@@ -222,6 +340,20 @@ class TelegramBotService(
                         IllegalArgumentException("Команда /chat требует сообщение. Использование: /chat <ваше сообщение>")
                     )
 
+                    // Активируем режим диалога
+                    activeDialogs[chatId] = true
+                    
+                    // Загружаем историю диалога (без последнего сообщения, если оно уже есть)
+                    val historyMessages = chatHistoryManager.getMessages(chatId)
+                    logger.info("Загружена история для chatId=$chatId: ${historyMessages.size} сообщений")
+                    historyMessages.forEachIndexed { index, msg ->
+                        logger.debug("История[$index]: role=${msg.role}, content=${msg.content.take(100)}...")
+                    }
+                    
+                    // Сохраняем сообщение пользователя в историю
+                    chatHistoryManager.addMessage(chatId, "user", message)
+                    logger.info("Сообщение пользователя сохранено в историю")
+
                     // Получаем настройки пользователя
                     val settings = getUserSettings(chatId)
 
@@ -238,7 +370,7 @@ class TelegramBotService(
                         }
                     }
 
-                    // Выполняем запрос с отслеживанием тулзов
+                    // Выполняем запрос с отслеживанием тулзов и историей диалога
                     val result = chatWithToolsService.execute(
                         ChatWithToolsService.Command(
                             message = message,
@@ -247,13 +379,38 @@ class TelegramBotService(
                             maxTokens = settings.maxTokens,
                             mcpServerUrls = defaultMcpServerUrls,
                             maxToolIterations = defaultMaxToolIterations,
-                            onToolCall = onToolCall
+                            onToolCall = onToolCall,
+                            historyMessages = historyMessages // Передаем историю диалога
                         )
                     )
 
                     result.fold(
                         onSuccess = { chatResult ->
                             logger.info("=== TelegramBotService: получен успешный результат ===")
+                            
+                            // Сохраняем ответ ассистента в историю с информацией о токенах
+                            chatHistoryManager.addMessage(
+                                chatId, 
+                                "assistant", 
+                                chatResult.content,
+                                chatResult.usage
+                            )
+                            
+                            // Извлекаем источники из результатов search_documents
+                            val sources = extractSourcesFromToolCalls(chatResult.toolCalls)
+                            
+                            // Формируем информацию о токенах
+                            val tokenInfo = buildString {
+                                chatResult.usage?.let { usage ->
+                                    append("\n\n")
+                                    append("📊 Использовано токенов:\n")
+                                    usage.promptTokens?.let { append("• Промпт: $it\n") }
+                                    usage.completionTokens?.let { append("• Ответ: $it\n") }
+                                    usage.totalTokens?.let { append("• Всего: $it\n") }
+                                    usage.cost?.let { append("• Стоимость: $$it\n") }
+                                }
+                            }
+                            
                             // Отправляем финальный результат без Markdown форматирования
                             val finalMessage = buildString {
                                 append("✅ Результат:\n\n")
@@ -262,6 +419,16 @@ class TelegramBotService(
                                     append("\n\n")
                                     append("Использовано инструментов: ${chatResult.toolCalls.size}")
                                 }
+                                // Добавляем список источников, если они были найдены
+                                if (sources.isNotEmpty()) {
+                                    append("\n\n")
+                                    append("📄 Источники:\n")
+                                    sources.forEach { source ->
+                                        append("• $source\n")
+                                    }
+                                }
+                                // Добавляем информацию о токенах
+                                append(tokenInfo)
                             }
 
                             logger.info("Отправка финального сообщения в Telegram (chatId: $chatId, длина: ${finalMessage.length})")
@@ -282,6 +449,22 @@ class TelegramBotService(
                             Result.failure(error)
                         }
                     )
+                }
+                
+                command == "/end" -> {
+                    // Архивируем текущий диалог
+                    val archivedFileName = chatHistoryManager.archiveDialog(chatId)
+                    
+                    // Завершаем диалог
+                    activeDialogs.remove(chatId)
+                    
+                    val message = if (archivedFileName != null) {
+                        "✅ Диалог завершен и сохранен в файл: $archivedFileName"
+                    } else {
+                        "✅ Диалог завершен."
+                    }
+                    sendMessage(chatId, message)
+                    Result.success("Диалог завершен")
                 }
 
                 command == "/vendor" -> {
@@ -352,7 +535,8 @@ class TelegramBotService(
                         🤖 *AI Chat Bot с поддержкой инструментов*
                         
                         *Команды:*
-                        /chat <сообщение> - Отправить запрос AI с использованием инструментов
+                        /chat <сообщение> - Начать диалог или отправить сообщение в активном диалоге
+                        /end - Завершить текущий диалог
                         /vendor - Показать текущий вендор
                         /vendor <название> - Изменить вендор (perplexity, gigachat, huggingface)
                         /model - Показать текущую модель
@@ -361,11 +545,15 @@ class TelegramBotService(
                         /maxtokens <число> - Изменить ограничение токенов
                         /help - Показать эту справку
                         
+                        *Режим диалога:*
+                        После команды /chat вы входите в режим диалога. Все ваши сообщения будут сохраняться в истории. Для завершения диалога используйте команду /end.
+                        
                         *Примеры:*
                         /chat Какая погода в Москве?
                         /vendor gigachat
                         /model GigaChat-2
                         /maxtokens 512
+                        /end
                         
                         Бот будет автоматически использовать доступные инструменты для выполнения вашего запроса.
                     """.trimIndent()
@@ -407,8 +595,14 @@ class TelegramBotService(
                 handleCommand(chatId, command, args)
             }
             else -> {
-                // Если сообщение не команда, обрабатываем как /chat
-                handleCommand(chatId, "/chat", text)
+                // Если сообщение не команда, проверяем, активен ли диалог
+                if (activeDialogs[chatId] == true) {
+                    // Пользователь в режиме диалога - обрабатываем как /chat
+                    handleCommand(chatId, "/chat", text)
+                } else {
+                    // Диалог не активен - предлагаем начать диалог
+                    sendMessage(chatId, "💬 Для начала диалога используйте команду /chat <ваше сообщение>")
+                }
             }
         }
     }
