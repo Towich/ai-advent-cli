@@ -405,13 +405,20 @@ class TelegramBotService(
             return
         }
 
-        // Упрощенный формат сообщения с action
+        // Упрощенный формат сообщения с action и query
         val action = toolCall.arguments["action"] ?: ""
+        val query = toolCall.arguments["query"] ?: ""
         val serverInfo = toolCall.serverUrl ?: defaultMcpServerUrls.firstOrNull() ?: "неизвестный сервер"
-        val message = if (action.isNotEmpty()) {
-            "🔧 Использую инструмент: ${toolCall.toolName} (action=$action)... (MCP=$serverInfo)"
-        } else {
-            "🔧 Использую инструмент: ${toolCall.toolName}... (MCP=$serverInfo)"
+        
+        val message = buildString {
+            append("🔧 Использую инструмент: ${toolCall.toolName}")
+            if (action.isNotEmpty()) {
+                append(" (action=$action)")
+            }
+            if (query.isNotEmpty()) {
+                append(" (query=$query)")
+            }
+            append("... (MCP=$serverInfo)")
         }
 
         logger.info("Отправляю уведомление о туле ${toolCall.toolName} в чат $chatId")
