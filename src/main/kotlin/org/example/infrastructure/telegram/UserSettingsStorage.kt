@@ -36,7 +36,10 @@ class UserSettingsStorage(
     data class UserSettingsData(
         val vendor: String,
         val model: String? = null,
-        val maxTokens: Int? = null
+        val maxTokens: Int? = null,
+        val temperature: Double? = null,
+        val systemPrompt: String? = null,
+        val includeToolsInSystemPrompt: Boolean? = null // null означает использовать значение по умолчанию (true)
     )
     
     @Serializable

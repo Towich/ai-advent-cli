@@ -75,6 +75,7 @@ class ReminderSummaryScheduler(
                 outputFormat = null,
                 outputSchema = null,
                 temperature = 0.2,
+                includeToolsInSystemPrompt = true, // Для напоминаний инструменты нужны
                 mcpServerUrls = AppConfig.mcpServerUrls,
                 maxToolIterations = AppConfig.reminderSummaryMaxToolIterations
             )

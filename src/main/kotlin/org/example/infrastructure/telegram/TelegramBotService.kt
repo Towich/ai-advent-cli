@@ -17,6 +17,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import org.example.application.ChatWithToolsService
+import org.example.data.repository.McpRepositoryImpl
+import org.example.domain.model.McpTool
 import org.example.infrastructure.config.VendorDetector
 import org.example.presentation.dto.ToolCallInfo
 import org.slf4j.LoggerFactory
@@ -67,7 +69,10 @@ class TelegramBotService(
     private data class UserSettings(
         var vendor: String,
         var model: String?,
-        var maxTokens: Int?
+        var maxTokens: Int?,
+        var temperature: Double?,
+        var systemPrompt: String?,
+        var includeToolsInSystemPrompt: Boolean = true // По умолчанию инструменты включены
     )
     
     private val userSettings = ConcurrentHashMap<Long, UserSettings>()
@@ -128,7 +133,10 @@ class TelegramBotService(
                 userSettings[chatId] = UserSettings(
                     vendor = settingsData.vendor,
                     model = settingsData.model,
-                    maxTokens = settingsData.maxTokens
+                    maxTokens = settingsData.maxTokens,
+                    temperature = settingsData.temperature,
+                    systemPrompt = settingsData.systemPrompt,
+                    includeToolsInSystemPrompt = settingsData.includeToolsInSystemPrompt ?: true
                 )
             }
             logger.info("Загружены сохраненные настройки для ${savedSettings.size} пользователей")
@@ -145,7 +153,10 @@ class TelegramBotService(
             val settingsData = UserSettingsStorage.UserSettingsData(
                 vendor = settings.vendor,
                 model = settings.model,
-                maxTokens = settings.maxTokens
+                maxTokens = settings.maxTokens,
+                temperature = settings.temperature,
+                systemPrompt = settings.systemPrompt,
+                includeToolsInSystemPrompt = settings.includeToolsInSystemPrompt
             )
             settingsStorage.saveUserSettings(chatId, settingsData)
         } catch (e: Exception) {
@@ -164,13 +175,19 @@ class TelegramBotService(
                 UserSettings(
                     vendor = savedSettings.vendor,
                     model = savedSettings.model,
-                    maxTokens = savedSettings.maxTokens
+                    maxTokens = savedSettings.maxTokens,
+                    temperature = savedSettings.temperature,
+                    systemPrompt = savedSettings.systemPrompt,
+                    includeToolsInSystemPrompt = savedSettings.includeToolsInSystemPrompt ?: true
                 )
             } else {
                 UserSettings(
                     vendor = defaultVendor,
                     model = defaultModel,
-                    maxTokens = defaultMaxTokens
+                    maxTokens = defaultMaxTokens,
+                    temperature = null,
+                    systemPrompt = null,
+                    includeToolsInSystemPrompt = true
                 )
             }
         }
@@ -480,6 +497,9 @@ class TelegramBotService(
                             vendor = settings.vendor,
                             model = settings.model,
                             maxTokens = settings.maxTokens,
+                            temperature = settings.temperature,
+                            systemPrompt = settings.systemPrompt,
+                            includeToolsInSystemPrompt = settings.includeToolsInSystemPrompt,
                             mcpServerUrls = defaultMcpServerUrls,
                             maxToolIterations = defaultMaxToolIterations,
                             onToolCall = onToolCall,
@@ -657,6 +677,128 @@ class TelegramBotService(
                         }
                     }
                 }
+                
+                command == "/temperature" -> {
+                    val temperatureArg = args?.trim()
+                    if (temperatureArg.isNullOrBlank()) {
+                        // Показываем текущую температуру
+                        val settings = getUserSettings(chatId)
+                        val temperatureText = settings.temperature?.toString() ?: "не установлена (используется по умолчанию)"
+                        sendMessage(chatId, "Текущая температура: $temperatureText\n\n💡 Диапазон: 0.0 - 2.0\n• Низкие значения (0.0-0.5) - более детерминированные ответы\n• Высокие значения (1.0-2.0) - более креативные ответы")
+                        Result.success("Текущая температура показана")
+                    } else {
+                        // Меняем температуру
+                        val temperatureValue = temperatureArg.toDoubleOrNull()
+                        if (temperatureValue == null) {
+                            sendMessage(chatId, "❌ Неверное значение. Температура должна быть числом.")
+                            Result.failure(IllegalArgumentException("Неверное значение temperature: $temperatureArg"))
+                        } else if (temperatureValue < 0 || temperatureValue >= 2) {
+                            sendMessage(chatId, "❌ Неверное значение. Температура должна быть в диапазоне: 0.0 <= temperature < 2.0")
+                            Result.failure(IllegalArgumentException("Температура вне диапазона: $temperatureArg"))
+                        } else {
+                            val settings = getUserSettings(chatId)
+                            settings.temperature = temperatureValue
+                            saveUserSettings(chatId, settings)
+                            sendMessage(chatId, "✅ Температура изменена на: ${settings.temperature}")
+                            Result.success("Температура изменена")
+                        }
+                    }
+                }
+
+                command == "/systemprompt" || command == "/prompt" -> {
+                    val promptArg = args?.trim()
+                    if (promptArg.isNullOrBlank() || promptArg.lowercase() == "show") {
+                        // Показываем текущий базовый системный промпт
+                        val settings = getUserSettings(chatId)
+                        val promptText = settings.systemPrompt ?: "не установлен (используется по умолчанию)"
+                        sendMessage(chatId, "Текущий базовый системный промпт:\n\n$promptText\n\n💡 Используйте /systemprompt full для просмотра полного промпта с инструментами")
+                        Result.success("Текущий системный промпт показан")
+                    } else if (promptArg.lowercase() == "full") {
+                        // Показываем полный промпт с инструментами
+                        val settings = getUserSettings(chatId)
+                        sendMessage(chatId, "⏳ Получаю список инструментов и формирую полный промпт...")
+                        
+                        val fullPrompt = getFullSystemPrompt(settings.systemPrompt, settings.includeToolsInSystemPrompt)
+                        fullPrompt.fold(
+                            onSuccess = { prompt ->
+                                // Разбиваем длинный промпт на части, если он слишком большой для Telegram
+                                val maxLength = 4000 // Telegram ограничение на длину сообщения
+                                if (prompt.length > maxLength) {
+                                    val parts = prompt.chunked(maxLength - 100)
+                                    parts.forEachIndexed { index, part ->
+                                        val partMessage = if (parts.size > 1) {
+                                            "📋 Полный системный промпт (часть ${index + 1}/${parts.size}):\n\n$part"
+                                        } else {
+                                            "📋 Полный системный промпт:\n\n$part"
+                                        }
+                                        sendMessage(chatId, partMessage)
+                                    }
+                                } else {
+                                    sendMessage(chatId, "📋 Полный системный промпт:\n\n$prompt")
+                                }
+                                Result.success("Полный системный промпт показан")
+                            },
+                            onFailure = { error ->
+                                sendMessage(chatId, "❌ Ошибка при получении полного промпта: ${error.message}")
+                                Result.failure(error)
+                            }
+                        )
+                    } else if (promptArg.lowercase() == "clear" || promptArg.lowercase() == "reset") {
+                        // Сбрасываем системный промпт
+                        val settings = getUserSettings(chatId)
+                        settings.systemPrompt = null
+                        saveUserSettings(chatId, settings)
+                        sendMessage(chatId, "✅ Системный промпт сброшен (будет использоваться по умолчанию)")
+                        Result.success("Системный промпт сброшен")
+                    } else {
+                        // Устанавливаем новый системный промпт
+                        val settings = getUserSettings(chatId)
+                        settings.systemPrompt = promptArg
+                        saveUserSettings(chatId, settings)
+                        sendMessage(chatId, "✅ Системный промпт установлен:\n\n$promptArg")
+                        Result.success("Системный промпт установлен")
+                    }
+                }
+
+                command == "/tools" -> {
+                    val toolsArg = args?.trim()?.lowercase()
+                    if (toolsArg.isNullOrBlank()) {
+                        // Показываем текущую настройку
+                        val settings = getUserSettings(chatId)
+                        val status = if (settings.includeToolsInSystemPrompt) "включено" else "выключено"
+                        val message = buildString {
+                            append("Текущая настройка добавления инструментов в системный промпт: $status\n\n")
+                            append("💡 Когда включено: в системный промпт добавляется описание всех доступных инструментов и правила их использования.\n")
+                            append("💡 Когда выключено: в системный промпт добавляется только ваш базовый промпт (если установлен).\n\n")
+                            append("Используйте:\n")
+                            append("/tools on - включить добавление инструментов\n")
+                            append("/tools off - выключить добавление инструментов")
+                        }
+                        sendMessage(chatId, message)
+                        Result.success("Текущая настройка показана")
+                    } else {
+                        // Меняем настройку
+                        val settings = getUserSettings(chatId)
+                        when (toolsArg) {
+                            "on", "enable", "true", "1", "вкл", "включить" -> {
+                                settings.includeToolsInSystemPrompt = true
+                                saveUserSettings(chatId, settings)
+                                sendMessage(chatId, "✅ Добавление инструментов в системный промпт включено")
+                                Result.success("Настройка изменена")
+                            }
+                            "off", "disable", "false", "0", "выкл", "выключить" -> {
+                                settings.includeToolsInSystemPrompt = false
+                                saveUserSettings(chatId, settings)
+                                sendMessage(chatId, "✅ Добавление инструментов в системный промпт выключено")
+                                Result.success("Настройка изменена")
+                            }
+                            else -> {
+                                sendMessage(chatId, "❌ Неверное значение. Используйте: /tools on или /tools off")
+                                Result.failure(IllegalArgumentException("Неверное значение: $toolsArg"))
+                            }
+                        }
+                    }
+                }
 
                 command == "/start" || command == "/help" -> {
                     val helpText = """
@@ -671,6 +813,15 @@ class TelegramBotService(
                         /model <название> - Изменить модель
                         /maxtokens - Показать текущее ограничение токенов
                         /maxtokens <число> - Изменить ограничение токенов
+                        /temperature - Показать текущую температуру
+                        /temperature <число> - Изменить температуру (0.0 - 2.0)
+                        /systemprompt - Показать текущий базовый системный промпт
+                        /systemprompt full - Показать полный системный промпт с инструментами
+                        /systemprompt <текст> - Установить новый системный промпт
+                        /systemprompt clear - Сбросить системный промпт
+                        /tools - Показать настройку добавления инструментов в системный промпт
+                        /tools on - Включить добавление инструментов в системный промпт
+                        /tools off - Выключить добавление инструментов в системный промпт
                         /help - Показать эту справку
                         
                         *Режим диалога:*
@@ -681,6 +832,10 @@ class TelegramBotService(
                         /vendor gigachat
                         /model GigaChat-2
                         /maxtokens 512
+                        /temperature 0.7
+                        /systemprompt Ты полезный ассистент
+                        /tools off
+                        /systemprompt full
                         /end
                         
                         Бот будет автоматически использовать доступные инструменты для выполнения вашего запроса.
@@ -835,6 +990,167 @@ class TelegramBotService(
                     delay(5000)
                 }
             }
+        }
+    }
+
+    /**
+     * Получает полный системный промпт с инструментами
+     */
+    private suspend fun getFullSystemPrompt(baseSystemPrompt: String?, includeTools: Boolean = true): Result<String> {
+        return try {
+            // Создаем MCP репозитории для каждого сервера
+            val mcpRepositories = mutableMapOf<String, McpRepositoryImpl>()
+            defaultMcpServerUrls.forEach { serverUrl ->
+                try {
+                    val repository = McpRepositoryImpl(serverUrl = serverUrl)
+                    mcpRepositories[serverUrl] = repository
+                    logger.info("Создан MCP репозиторий для сервера: $serverUrl")
+                } catch (e: Exception) {
+                    logger.error("Ошибка при создании репозитория для сервера $serverUrl: ${e.message}", e)
+                }
+            }
+            
+            if (mcpRepositories.isEmpty()) {
+                return Result.failure(Exception("Не удалось подключиться ни к одному MCP серверу"))
+            }
+            
+            // Получаем список тулзов от всех серверов
+            val allTools = mutableListOf<McpTool>()
+            mcpRepositories.forEach { (serverUrl, repository) ->
+                try {
+                    val toolsResult = repository.listTools()
+                    toolsResult.fold(
+                        onSuccess = { tools ->
+                            val toolsWithServer = tools.map { tool ->
+                                tool.copy(serverUrl = serverUrl)
+                            }
+                            allTools.addAll(toolsWithServer)
+                            logger.info("Получено ${tools.size} тулзов от MCP-сервера: $serverUrl")
+                        },
+                        onFailure = { error ->
+                            logger.error("Ошибка при получении списка тулзов от сервера $serverUrl: ${error.message}")
+                        }
+                    )
+                } catch (e: Exception) {
+                    logger.error("Исключение при получении тулзов от сервера $serverUrl: ${e.message}", e)
+                }
+            }
+            
+            // Формируем полный системный промпт
+            val fullPrompt = buildFullSystemPrompt(allTools, baseSystemPrompt, includeTools)
+            Result.success(fullPrompt)
+        } catch (e: Exception) {
+            logger.error("Ошибка при получении полного системного промпта: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Формирует полный системный промпт с инструментами
+     */
+    private fun buildFullSystemPrompt(tools: List<McpTool>, baseSystemPrompt: String?, includeTools: Boolean = true): String {
+        val parts = mutableListOf<String>()
+        
+        // Базовый системный промпт
+        baseSystemPrompt?.let { parts.add(it) }
+        
+        // Описание тулзов (добавляем только если includeTools = true)
+        if (includeTools) {
+            val toolsDescription = buildString {
+            append("You are an AI agent that can use tools through MCP (Model Context Protocol).\n")
+            append("You can chain multiple tool calls in a conversation to accomplish complex tasks.\n\n")
+            append("Available tools:\n")
+            tools.forEachIndexed { index, tool ->
+                append("${index + 1}) ${tool.name}")
+                tool.description?.let { append(": $it") }
+                tool.serverUrl?.let { append(" [MCP: $it]") }
+                append("\n")
+                
+                // Описываем схему аргументов
+                tool.inputSchema?.let { schema ->
+                    append("   Arguments: ")
+                    val argsDescription = extractArgumentsDescription(schema)
+                    append(argsDescription)
+                    append("\n")
+                }
+            }
+            append("\n")
+            append("IMPORTANT RULES:\n")
+            append("1. You can call tools multiple times in a chain. After a tool is executed, you will receive its result and can call another tool if needed.\n")
+            append("2. You can use different tools in sequence to accomplish your goal.\n")
+            append("3. Continue using tools until you have all the information needed to provide a final answer.\n")
+            append("4. Only stop using tools when you have enough information to give a complete answer to the user.\n\n")
+            append("RESPONSE FORMAT:\n")
+            append("If you need to call a tool, respond with JSON ONLY in this format:\n")
+            append("{\"tool\": \"<tool_name>\", \"args\": { ... }}\n")
+            append("\n")
+            append("If you have enough information and want to provide the final answer (no more tools needed), respond with JSON ONLY in this format:\n")
+            append("{\"final\": \"<your final answer>\"}\n")
+            append("\n")
+            append("CRITICAL: Your response must be valid JSON. Do not include any text before or after the JSON.")
+            }
+            parts.add(toolsDescription)
+        }
+        
+        return parts.joinToString("\n\n")
+    }
+    
+    /**
+     * Извлекает описание аргументов из JSON Schema
+     */
+    private fun extractArgumentsDescription(schema: Map<String, JsonElement>): String {
+        return try {
+            // Пытаемся найти properties в схеме (стандартный формат JSON Schema)
+            val properties = schema["properties"]?.jsonObject
+            if (properties != null) {
+                // Извлекаем свойства и их типы
+                val argsList = properties.entries.mapNotNull { (propName, propValue) ->
+                    val propObj = propValue.jsonObject ?: return@mapNotNull null
+                    val type = propObj["type"]?.jsonPrimitive?.content ?: "any"
+                    val title = propObj["title"]?.jsonPrimitive?.content
+                    val description = propObj["description"]?.jsonPrimitive?.content
+                    
+                    val argDesc = buildString {
+                        append(propName)
+                        append(": ")
+                        append(type)
+                        title?.let { append(" ($it)") }
+                        description?.let { append(" - $it") }
+                    }
+                    argDesc
+                }
+                
+                // Проверяем required поля
+                val required = schema["required"]?.jsonArray?.mapNotNull { element ->
+                    try {
+                        element.jsonPrimitive.content
+                    } catch (e: Exception) {
+                        null
+                    }
+                } ?: emptyList()
+                
+                if (argsList.isEmpty()) {
+                    "нет аргументов"
+                } else {
+                    val requiredStr = if (required.isNotEmpty()) {
+                        " (обязательные: ${required.joinToString(", ")})"
+                    } else {
+                        ""
+                    }
+                    argsList.joinToString(", ") + requiredStr
+                }
+            } else {
+                // Если нет properties, пытаемся описать схему проще
+                val type = schema["type"]?.jsonPrimitive?.content
+                if (type != null) {
+                    "type: $type"
+                } else {
+                    "см. схему выше"
+                }
+            }
+        } catch (e: Exception) {
+            logger.debug("Ошибка при извлечении описания аргументов: ${e.message}")
+            "см. схему выше"
         }
     }
 

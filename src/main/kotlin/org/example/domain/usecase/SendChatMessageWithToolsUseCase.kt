@@ -61,6 +61,7 @@ class SendChatMessageWithToolsUseCase(
         outputFormat: String?,
         outputSchema: String?,
         temperature: Double?,
+        includeToolsInSystemPrompt: Boolean = true, // По умолчанию инструменты включены в системный промпт
         mcpServerUrls: List<String>,
         maxToolIterations: Int,
         onToolCall: (suspend (ToolCallInfo) -> Unit)? = null,
@@ -139,8 +140,8 @@ class SendChatMessageWithToolsUseCase(
             val maxTokensToUse = maxTokens ?: defaultMaxTokens
             val disableSearchToUse = disableSearch ?: true
             
-            // Формируем system prompt с описанием тулзов
-            val toolsSystemPrompt = buildToolsSystemPrompt(tools, systemPrompt, outputFormat, outputSchema)
+            // Формируем system prompt с описанием тулзов (или без них, в зависимости от настройки)
+            val toolsSystemPrompt = buildToolsSystemPrompt(tools, systemPrompt, outputFormat, outputSchema, includeToolsInSystemPrompt)
             
             // Создаем начальные сообщения
             val messages = mutableListOf<Message>()
@@ -381,15 +382,17 @@ class SendChatMessageWithToolsUseCase(
         tools: List<McpTool>,
         baseSystemPrompt: String?,
         outputFormat: String?,
-        outputSchema: String?
+        outputSchema: String?,
+        includeTools: Boolean = true
     ): String {
         val parts = mutableListOf<String>()
         
         // Базовый системный промпт
         baseSystemPrompt?.let { parts.add(it) }
         
-        // Описание тулзов
-        val toolsDescription = buildString {
+        // Описание тулзов (добавляем только если includeTools = true)
+        if (includeTools) {
+            val toolsDescription = buildString {
             append("You are an AI agent that can use tools through MCP (Model Context Protocol).\n")
             append("You can chain multiple tool calls in a conversation to accomplish complex tasks.\n\n")
             append("Available tools:\n")
@@ -421,8 +424,9 @@ class SendChatMessageWithToolsUseCase(
             append("{\"final\": \"<your final answer>\"}\n")
             append("\n")
             append("CRITICAL: Your response must be valid JSON. Do not include any text before or after the JSON.")
+            }
+            parts.add(toolsDescription)
         }
-        parts.add(toolsDescription)
         
         // Формат вывода
         outputFormat?.let { format ->

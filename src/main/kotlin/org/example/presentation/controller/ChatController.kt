@@ -312,6 +312,7 @@ class ChatController(
                     outputFormat = request.outputFormat,
                     outputSchema = request.outputSchema,
                     temperature = request.temperature,
+                    includeToolsInSystemPrompt = request.includeToolsInSystemPrompt ?: true,
                     mcpServerUrls = request.mcpServerUrls,
                     maxToolIterations = request.maxToolIterations
                 )

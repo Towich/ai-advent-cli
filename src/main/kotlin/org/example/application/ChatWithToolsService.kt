@@ -21,6 +21,7 @@ class ChatWithToolsService(
         val outputFormat: String? = null,
         val outputSchema: String? = null,
         val temperature: Double? = null,
+        val includeToolsInSystemPrompt: Boolean = true, // По умолчанию инструменты включены в системный промпт
         val mcpServerUrls: List<String>,
         val maxToolIterations: Int? = 10,
         val onToolCall: (suspend (ToolCallInfo) -> Unit)? = null,
@@ -41,6 +42,7 @@ class ChatWithToolsService(
             outputFormat = command.outputFormat,
             outputSchema = command.outputSchema,
             temperature = command.temperature,
+            includeToolsInSystemPrompt = command.includeToolsInSystemPrompt,
             mcpServerUrls = command.mcpServerUrls,
             maxToolIterations = maxToolIterations,
             onToolCall = command.onToolCall,
