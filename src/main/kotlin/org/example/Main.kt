@@ -23,6 +23,7 @@ import org.example.infrastructure.config.AppConfig
 import org.example.infrastructure.notification.TelegramNotifier
 import org.example.infrastructure.scheduler.ReminderSummaryScheduler
 import org.example.infrastructure.telegram.TelegramBotService
+import org.example.infrastructure.telegram.VoiceTranscriptionService
 import org.example.presentation.controller.ChatController
 import org.example.presentation.controller.McpController
 import org.slf4j.LoggerFactory
@@ -126,6 +127,19 @@ fun Application.module() {
     )
     val reminderJob: Job = reminderSummaryScheduler.start(this)
     
+    // Инициализация сервиса транскрипции голоса
+    val voiceTranscriptionService = try {
+        logger.info("Инициализация сервиса транскрипции голоса...")
+        VoiceTranscriptionService(
+            whisperCommand = System.getenv("WHISPER_COMMAND") ?: "whisper",
+            whisperModel = System.getenv("WHISPER_MODEL") ?: "base",
+            whisperLanguage = System.getenv("WHISPER_LANGUAGE")?.takeIf { it.isNotBlank() }
+        )
+    } catch (e: Exception) {
+        logger.warn("Не удалось инициализировать сервис транскрипции: ${e.message}. Голосовые сообщения не будут обрабатываться.")
+        null
+    }
+    
     // Инициализация Telegram-бота
     val telegramBotService = run {
         if (AppConfig.telegramBotEnabled) {
@@ -142,7 +156,8 @@ fun Application.module() {
                     defaultModel = AppConfig.telegramBotDefaultModel,
                     defaultMaxTokens = AppConfig.maxTokens,
                     defaultMcpServerUrls = AppConfig.mcpServerUrls,
-                    defaultMaxToolIterations = AppConfig.telegramBotDefaultMaxToolIterations
+                    defaultMaxToolIterations = AppConfig.telegramBotDefaultMaxToolIterations,
+                    voiceTranscriptionService = voiceTranscriptionService
                 )
             }
         } else {

@@ -7,6 +7,9 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.http.*
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.SerialName
@@ -34,7 +37,8 @@ class TelegramBotService(
     private val defaultModel: String? = null,
     private val defaultMaxTokens: Int? = null,
     private val defaultMcpServerUrls: List<String> = listOf("http://localhost:8002/mcp"),
-    private val defaultMaxToolIterations: Int = 10
+    private val defaultMaxToolIterations: Int = 10,
+    private val voiceTranscriptionService: VoiceTranscriptionService? = null
 ) {
     private val logger = LoggerFactory.getLogger(TelegramBotService::class.java)
     private val jsonParser = Json {
@@ -215,6 +219,34 @@ class TelegramBotService(
     )
 
     @Serializable
+    data class Voice(
+        @SerialName("file_id") val fileId: String,
+        @SerialName("file_unique_id") val fileUniqueId: String,
+        val duration: Int,
+        @SerialName("mime_type") val mimeType: String? = null,
+        @SerialName("file_size") val fileSize: Int? = null
+    )
+    
+    @Serializable
+    data class Audio(
+        @SerialName("file_id") val fileId: String,
+        @SerialName("file_unique_id") val fileUniqueId: String,
+        val duration: Int,
+        @SerialName("mime_type") val mimeType: String? = null,
+        @SerialName("file_size") val fileSize: Int? = null,
+        val title: String? = null,
+        val performer: String? = null
+    )
+    
+    @Serializable
+    data class FileInfo(
+        @SerialName("file_id") val fileId: String,
+        @SerialName("file_unique_id") val fileUniqueId: String,
+        @SerialName("file_size") val fileSize: Int? = null,
+        @SerialName("file_path") val filePath: String? = null
+    )
+
+    @Serializable
     data class Message(
         @SerialName("message_id") val messageId: Long,
         val from: User? = null,
@@ -222,7 +254,9 @@ class TelegramBotService(
         val text: String? = null,
         val date: Long,
         @SerialName("edit_date") val editDate: Long? = null,
-        val entities: List<MessageEntity>? = null
+        val entities: List<MessageEntity>? = null,
+        val voice: Voice? = null,
+        val audio: Audio? = null
     )
 
     @Serializable
@@ -860,14 +894,268 @@ class TelegramBotService(
     }
 
     /**
+     * Получает информацию о файле по file_id
+     */
+    private suspend fun getFile(fileId: String): Result<FileInfo> {
+        return try {
+            val url = URLBuilder("https://api.telegram.org")
+                .appendPathSegments("bot$botToken", "getFile")
+                .apply {
+                    parameters.append("file_id", fileId)
+                }
+                .build()
+
+            val resp: TelegramResponse = httpClient.get(url).body<TelegramResponse>()
+
+            if (!resp.ok) {
+                Result.failure(
+                    IllegalStateException(
+                        "Telegram getFile failed: ${resp.errorCode ?: "N/A"} ${resp.description ?: "unknown error"}"
+                    )
+                )
+            } else {
+                val fileInfo = resp.result?.let {
+                    jsonParser.decodeFromJsonElement(FileInfo.serializer(), it)
+                } ?: return Result.failure(IllegalStateException("File info not found in response"))
+                
+                Result.success(fileInfo)
+            }
+        } catch (e: Exception) {
+            logger.error("Ошибка при получении информации о файле: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Скачивает файл из Telegram
+     */
+    private suspend fun downloadFile(filePath: String): Result<File> {
+        return try {
+            val url = URLBuilder("https://api.telegram.org")
+                .appendPathSegments("file", "bot$botToken", filePath)
+                .build()
+
+            logger.info("Скачиваю файл: $filePath")
+            
+            val tempFile = File.createTempFile("telegram_voice_", ".ogg")
+            tempFile.deleteOnExit()
+
+            val bytes = withContext(Dispatchers.IO) {
+                httpClient.get(url).body<ByteArray>()
+            }
+            
+            withContext(Dispatchers.IO) {
+                tempFile.writeBytes(bytes)
+            }
+
+            logger.info("Файл скачан: ${tempFile.absolutePath}, размер: ${tempFile.length()} байт")
+            Result.success(tempFile)
+        } catch (e: Exception) {
+            logger.error("Ошибка при скачивании файла: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Обрабатывает голосовое сообщение
+     */
+    private suspend fun handleVoiceMessage(chatId: Long, voice: Voice) {
+        logger.info("Получено голосовое сообщение: fileId=${voice.fileId}, duration=${voice.duration}s")
+        
+        if (voiceTranscriptionService == null) {
+            sendMessage(chatId, "❌ Сервис транскрипции не настроен. Обратитесь к администратору.")
+            return
+        }
+
+        // Отправляем сообщение о начале обработки
+        sendMessage(chatId, "🎤 Получено голосовое сообщение. Начинаю транскрипцию...")
+
+        try {
+            // Получаем информацию о файле
+            val fileInfoResult = getFile(voice.fileId)
+            val fileInfo = fileInfoResult.getOrElse {
+                sendMessage(chatId, "❌ Ошибка при получении информации о файле: ${it.message}")
+                return
+            }
+
+            val filePath = fileInfo.filePath ?: run {
+                sendMessage(chatId, "❌ Путь к файлу не найден")
+                return
+            }
+
+            // Скачиваем файл
+            val audioFileResult = downloadFile(filePath)
+            val audioFile = audioFileResult.getOrElse {
+                sendMessage(chatId, "❌ Ошибка при скачивании файла: ${it.message}")
+                return
+            }
+
+            // Транскрибируем голос в текст
+            sendMessage(chatId, "⏳ Выполняю транскрипцию...")
+            val transcription = voiceTranscriptionService.transcribe(audioFile)
+
+            // Удаляем временный файл
+            audioFile.delete()
+
+            if (transcription.isNullOrBlank()) {
+                sendMessage(chatId, "❌ Не удалось выполнить транскрипцию. Убедитесь, что Whisper установлен: pip install -U openai-whisper")
+                return
+            }
+
+            logger.info("Транскрипция завершена: $transcription")
+
+            // Отправляем транскрибированный текст пользователю
+            sendMessage(chatId, "📝 Транскрипция:\n\n$transcription")
+
+            // Отправляем транскрибированный текст в AI
+            // Активируем режим диалога, если он еще не активен
+            activeDialogs[chatId] = true
+            
+            // Загружаем историю диалога
+            val historyMessages = chatHistoryManager.getMessages(chatId)
+            logger.info("Загружена история для chatId=$chatId: ${historyMessages.size} сообщений")
+            
+            // Сохраняем транскрибированное сообщение пользователя в историю
+            chatHistoryManager.addMessage(chatId, "user", transcription)
+            logger.info("Транскрибированное сообщение пользователя сохранено в историю")
+
+            // Получаем настройки пользователя
+            val settings = getUserSettings(chatId)
+
+            // Отправляем сообщение о начале обработки AI
+            sendMessage(chatId, "⏳ Обрабатываю запрос...")
+
+            // Создаем колбэк для уведомлений о тулзах в реальном времени
+            val onToolCall: suspend (ToolCallInfo) -> Unit = { toolCall ->
+                logger.info("Колбэк onToolCall вызван для тула: ${toolCall.toolName}")
+                try {
+                    sendToolCallNotification(chatId, toolCall)
+                } catch (e: Exception) {
+                    logger.error("Ошибка при отправке уведомления о туле в колбэке: ${e.message}", e)
+                }
+            }
+
+            // Выполняем запрос с отслеживанием тулзов и историей диалога
+            val result = chatWithToolsService.execute(
+                ChatWithToolsService.Command(
+                    message = transcription,
+                    vendor = settings.vendor,
+                    model = settings.model,
+                    maxTokens = settings.maxTokens,
+                    temperature = settings.temperature,
+                    systemPrompt = settings.systemPrompt,
+                    includeToolsInSystemPrompt = settings.includeToolsInSystemPrompt,
+                    mcpServerUrls = defaultMcpServerUrls,
+                    maxToolIterations = defaultMaxToolIterations,
+                    onToolCall = onToolCall,
+                    historyMessages = historyMessages
+                )
+            )
+
+            result.fold(
+                onSuccess = { chatResult ->
+                    logger.info("=== TelegramBotService: получен успешный результат ===")
+                    
+                    // Сохраняем ответ ассистента в историю с информацией о токенах
+                    chatHistoryManager.addMessage(
+                        chatId, 
+                        "assistant", 
+                        chatResult.content,
+                        chatResult.usage
+                    )
+                    
+                    // Извлекаем источники из результатов search_documents
+                    val sources = extractSourcesFromToolCalls(chatResult.toolCalls)
+                    
+                    // Формируем информацию о токенах
+                    val tokenInfo = buildString {
+                        chatResult.usage?.let { usage ->
+                            append("\n\n")
+                            append("📊 Использовано токенов:\n")
+                            usage.promptTokens?.let { append("• Промпт: $it\n") }
+                            usage.completionTokens?.let { append("• Ответ: $it\n") }
+                            usage.totalTokens?.let { append("• Всего: $it\n") }
+                            usage.cost?.let { append("• Стоимость: $$it\n") }
+                        }
+                    }
+                    
+                    // Отправляем финальный результат без Markdown форматирования
+                    val finalMessage = buildString {
+                        append("✅ Результат:\n\n")
+                        append(chatResult.content)
+                        if (chatResult.toolCalls.isNotEmpty()) {
+                            append("\n\n")
+                            append("Использовано инструментов: ${chatResult.toolCalls.size}")
+                        }
+                        // Добавляем список источников, если они были найдены
+                        if (sources.isNotEmpty()) {
+                            append("\n\n")
+                            append("📄 Источники:\n")
+                            sources.forEach { source ->
+                                append("• $source\n")
+                            }
+                        }
+                        // Добавляем информацию о токенах
+                        append(tokenInfo)
+                    }
+
+                    logger.info("Отправка финального сообщения в Telegram (chatId: $chatId, длина: ${finalMessage.length})")
+                    val sendResult = sendMessage(chatId, finalMessage, parseMode = null)
+                    sendResult.fold(
+                        onSuccess = {
+                            logger.info("✅ Сообщение успешно отправлено в Telegram")
+                        },
+                        onFailure = { error ->
+                            logger.error("❌ Ошибка при отправке сообщения в Telegram: ${error.message}", error)
+                        }
+                    )
+                },
+                onFailure = { error ->
+                    val errorMessage = "❌ Ошибка: ${error.message ?: "Неизвестная ошибка"}"
+                    sendMessage(chatId, errorMessage)
+                }
+            )
+        } catch (e: Exception) {
+            logger.error("Ошибка при обработке голосового сообщения: ${e.message}", e)
+            sendMessage(chatId, "❌ Произошла ошибка при обработке голосового сообщения: ${e.message}")
+        }
+    }
+
+    /**
      * Обрабатывает обновление от Telegram
      */
     suspend fun handleUpdate(update: Update) {
         val message = update.message ?: return
         val chatId = message.chat.id
+
+        logger.info("Получено сообщение от пользователя ${message.from?.id}")
+
+        // Проверяем, есть ли голосовое сообщение
+        val voice = message.voice
+        if (voice != null) {
+            handleVoiceMessage(chatId, voice)
+            return
+        }
+
+        // Проверяем, есть ли аудио сообщение
+        val audio = message.audio
+        if (audio != null) {
+            // Обрабатываем как голосовое сообщение
+            val voiceFromAudio = Voice(
+                fileId = audio.fileId,
+                fileUniqueId = audio.fileUniqueId,
+                duration = audio.duration,
+                mimeType = audio.mimeType,
+                fileSize = audio.fileSize
+            )
+            handleVoiceMessage(chatId, voiceFromAudio)
+            return
+        }
+
+        // Обрабатываем текстовое сообщение
         val text = message.text ?: return
 
-        logger.info("Получено сообщение от пользователя ${message.from?.id}: $text")
+        logger.info("Получено текстовое сообщение: $text")
 
         // Парсим команду
         when {
